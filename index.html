@@ -21,7 +21,7 @@
   color-scheme:dark}}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 var(--font)}
-.wrap{max-width:760px;margin:0 auto;padding-inline:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(120px + env(safe-area-inset-bottom,0px))}
+.wrap{max-width:760px;margin:0 auto;padding-inline:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(170px + env(safe-area-inset-bottom,0px))}
 header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 h1{font-size:1.15rem;margin:0;letter-spacing:.02em}
 .status{font-size:.8rem;color:var(--muted);display:flex;align-items:center;gap:6px}
@@ -53,6 +53,9 @@ textarea{min-height:90px;resize:vertical}
 .rec.stop{background:var(--ink);color:var(--surface)}
 .rec:disabled{opacity:.5;cursor:default}
 .sec{font:inherit;font-size:.85rem;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:12px 14px;cursor:pointer;white-space:nowrap}
+.bar{display:flex;flex-direction:column;gap:8px}
+.tools .sec{flex:1;padding:9px 6px;font-size:.8rem}
+.tools .claude{flex:1.6;font-weight:700;border-color:var(--sp1);color:var(--sp1)}
 button:focus-visible,summary:focus-visible{outline:2px solid var(--sp1);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){.status.live .dot{animation:none}}
 </style>
@@ -88,12 +91,17 @@ button:focus-visible,summary:focus-visible{outline:2px solid var(--sp1);outline-
   </div>
 </div>
 
-<div class="bar"><div class="bar-in">
-  <button class="sec" id="copyBtn" type="button">コピー</button>
-  <button class="sec" id="saveBtn" type="button">保存</button>
-  <button class="rec" id="recBtn" type="button">● 録音開始</button>
-  <button class="sec" id="clearBtn" type="button">消去</button>
-</div></div>
+<div class="bar">
+  <div class="bar-in tools">
+    <button class="sec claude" id="claudeBtn" type="button">Claudeで整形</button>
+    <button class="sec" id="copyBtn" type="button">コピー</button>
+    <button class="sec" id="saveBtn" type="button">保存</button>
+    <button class="sec" id="clearBtn" type="button">消去</button>
+  </div>
+  <div class="bar-in">
+    <button class="rec" id="recBtn" type="button">● 録音開始</button>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -428,6 +436,27 @@ $("copyBtn").addEventListener("click", async () => {
   if (!t){ notice("まだコピーする内容がありません。"); return; }
   try{ await navigator.clipboard.writeText(t); notice("コピーしました。"); setTimeout(() => notice(""), 1500); }
   catch(e){ const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); notice("コピーしました。"); }
+});
+$("claudeBtn").addEventListener("click", () => {
+  if (recording){ notice("録音中です。先に「停止」を押してから整形してください。"); return; }
+  const t = plainText();
+  if (!t){ notice("まだ整形する内容がありません。"); return; }
+  const d = new Date();
+  const ymd = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  const text = "以下は面談の文字起こしです（" + ymd + "）。文字起こし整形スキルで整形したうえで、できるだけ詳しく議事録にまとめてください。\n\n---\n\n" + t;
+  // クリップボードへの書き込みとタブを開く操作は、どちらもタップの直後に行う必要がある
+  let copied = null;
+  try{ copied = navigator.clipboard.writeText(text); }catch(e){ copied = Promise.reject(e); }
+  window.open("https://claude.ai/new", "_blank");
+  copied.then(
+    () => notice("整形の指示つきでコピーしました。開いたClaudeに貼り付けて送信してください。"),
+    () => {
+      const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select();
+      let ok = false; try{ ok = document.execCommand("copy"); }catch(e){}
+      ta.remove();
+      notice(ok ? "整形の指示つきでコピーしました。開いたClaudeに貼り付けて送信してください。"
+                : "自動でコピーできませんでした。「コピー」ボタンで全文をコピーして、Claudeに貼り付けてください。");
+    });
 });
 $("saveBtn").addEventListener("click", async () => {
   const t = plainText();
