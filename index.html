@@ -281,12 +281,16 @@ async function start(){
   $("recBtn").disabled = true;
   setStatus("マイクを準備中…");
   try{
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error("no mediaDevices"), { name: "NoMediaDevices" });
+    try{
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    }catch(e1){
+      if (e1.name === "NotAllowedError" || e1.name === "SecurityError") throw e1;
+      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });   // 細かい指定を受け付けない端末向け
+    }
   }catch(e){
     $("recBtn").disabled = false; setStatus("待機中");
-    notice(location.protocol === "file:" || location.protocol === "https:" || location.hostname === "localhost"
-      ? "マイクが使えませんでした。ブラウザの設定でこのページのマイクを許可してください。"
-      : "マイクが使えませんでした。スマホでは https:// で始まるアドレスでページを開く必要があります。");
+    notice(micErrorMessage(e));
     return;
   }
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -352,6 +356,19 @@ async function start(){
     teardown();
     if (wasUnexpected) notice("接続が切れました。ここまでの内容は残っています。もう一度「録音開始」で続きから記録できます。");
   };
+}
+function micErrorMessage(e){
+  const name = (e && e.name) || "";
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  if (name === "NoMediaDevices" || (location.protocol === "http:" && location.hostname !== "localhost"))
+    return "このブラウザではマイクが使えません。https:// で始まるアドレスで開いてください。";
+  if (name === "NotAllowedError" || name === "SecurityError")
+    return ios
+      ? "マイクの使用が許可されていません。iPhoneの「設定」アプリ → 使っているブラウザ（ChromeまたはSafari）→「マイク」をオンにしてから、このページを再読み込みしてもう一度押してください。（エラー：" + name + "）"
+      : "マイクの使用が許可されていません。アドレスバーのマークからこのサイトのマイクを許可して、ページを再読み込みしてください。（エラー：" + name + "）";
+  if (name === "NotFoundError") return "マイクが見つかりませんでした。マイクがつながっているか確認してください。（エラー：" + name + "）";
+  if (name === "NotReadableError") return "マイクをほかのアプリが使っている可能性があります。通話や録音のアプリを閉じてから試してください。（エラー：" + name + "）";
+  return "マイクが使えませんでした。（エラー：" + (name || String(e)) + "）";
 }
 function explainError(code){
   if (code == 401) return "（APIキーが正しくありません）";
