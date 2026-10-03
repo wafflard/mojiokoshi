@@ -321,25 +321,43 @@ async function start(){
   // 再開時は、前回までの経過時間の後ろに時刻をつなげる
   sessionOffset = elapsedTotal;
   stopping = false;
-  ws = new WebSocket("wss://stt-rt.soniox.com/transcribe-websocket");
-  ws.binaryType = "arraybuffer";
-  ws.onopen = () => {
-    ws.send(JSON.stringify(config));
-    src = audioCtx.createMediaStreamSource(mediaStream);
-    proc = audioCtx.createScriptProcessor(4096, 1, 1);
-    proc.onaudioprocess = ev => {
-      if (!ws || ws.readyState !== 1 || stopping) return;
-      const pcm = resample(ev.inputBuffer.getChannelData(0));
-      if (pcm.length) ws.send(pcm.buffer);
-    };
-    src.connect(proc); proc.connect(audioCtx.destination);
-    recording = true; sessionStart = Date.now();
-    timer = setInterval(updateMeta, 1000);
-    setStatus("録音中", true);
-    $("recBtn").disabled = false; $("recBtn").textContent = "■ 停止"; $("recBtn").classList.add("stop");
-    keepAwake();
+  reconnects = 0;
+  currentConfig = config;
+  // マイクの処理は接続が切れても止めず、つなぎ直したソケットへそのまま送り続ける
+  src = audioCtx.createMediaStreamSource(mediaStream);
+  proc = audioCtx.createScriptProcessor(4096, 1, 1);
+  proc.onaudioprocess = ev => {
+    const pcm = resample(ev.inputBuffer.getChannelData(0));
+    if (!ws || ws.readyState !== 1 || stopping || !pcm.length) return;
+    ws.send(pcm.buffer); lastSent = Date.now();
   };
-  ws.onmessage = ev => {
+  src.connect(proc); proc.connect(audioCtx.destination);
+  openSocket(true);
+}
+
+const WS_URL = "wss://stt-rt.soniox.com/transcribe-websocket";
+const MAX_RECONNECTS = 5;
+let reconnects = 0, lastSent = 0, currentConfig = null;
+
+function openSocket(first){
+  const sock = new WebSocket(WS_URL);
+  sock.binaryType = "arraybuffer";
+  ws = sock;
+  sock.onopen = () => {
+    sock.send(JSON.stringify(currentConfig));
+    lastSent = Date.now();
+    if (first){
+      recording = true; sessionStart = Date.now();
+      timer = setInterval(tick, 1000);
+      $("recBtn").disabled = false; $("recBtn").textContent = "■ 停止"; $("recBtn").classList.add("stop");
+      keepAwake();
+    } else {
+      notice("接続が一度切れたため、自動でつなぎ直しました（" + reconnects + "回目）。続きを記録しています。話者の番号は振り直しになることがあります。");
+    }
+    setStatus("録音中", true);
+  };
+  sock.onmessage = ev => {
+    if (ws !== sock) return;
     let r; try{ r = JSON.parse(ev.data); }catch(e){ return; }
     if (r.error_code || r.error_message){
       notice("Sonioxからエラーが返りました：" + (r.error_message || r.error_code) + explainError(r.error_code));
@@ -351,19 +369,48 @@ async function start(){
         if (!tk.text || /^<\w+>$/.test(tk.text)) return;   // <end> などの制御用トークンは表示しない
         (tk.is_final ? fin : prov).push(tk);
       });
-      if (fin.length) appendFinal(fin);
+      if (fin.length){ appendFinal(fin); reconnects = 0; }
       provisional = prov;
       renderProvisional();
       if (fin.length || prov.length) window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
     }
     if (r.finished){ provisional = []; renderProvisional(); closeSocket(); }
   };
-  ws.onerror = () => { if (!stopping) notice("Sonioxにつながりませんでした。APIキーとネット接続を確認してください。"); };
-  ws.onclose = () => {
-    const wasUnexpected = recording && !stopping;
-    teardown();
-    if (wasUnexpected) notice("接続が切れました。ここまでの内容は残っています。もう一度「録音開始」で続きから記録できます。");
+  sock.onerror = () => {};   // 理由は onclose でまとめて扱う
+  sock.onclose = ev => {
+    if (ws !== sock) return;
+    const code = ev.code + (ev.reason ? "・" + ev.reason : "");
+    if (stopping){ teardown(); return; }
+    if (!recording){
+      teardown();
+      notice("Sonioxにつながりませんでした。APIキーとネット接続を確認してください。（コード：" + code + "）");
+      return;
+    }
+    // 録音中に切れた：確定前の文字を確定扱いにして、少し待ってつなぎ直す
+    if (provisional.length){ appendFinal(provisional); provisional = []; renderProvisional(); }
+    ws = null;
+    if (reconnects < MAX_RECONNECTS){
+      reconnects++;
+      setStatus("再接続中…（" + reconnects + "回目）", true);
+      setTimeout(() => {
+        if (!recording || stopping) return;
+        sessionOffset = elapsedTotal + (Date.now() - sessionStart);
+        openSocket(false);
+      }, 1000 * reconnects);
+    } else {
+      teardown();
+      notice("接続が何度も切れたため、録音を止めました（コード：" + code + "）。ネット接続を確認してください。ここまでの内容は残っていて、もう一度「録音開始」で続きから記録できます。");
+    }
   };
+}
+
+// 1秒ごと：経過時間の表示、無音が続いたときの接続維持、止まったマイク処理の再開
+function tick(){
+  updateMeta();
+  if (ws && ws.readyState === 1 && Date.now() - lastSent > 5000){
+    try{ ws.send(JSON.stringify({ type: "keepalive" })); lastSent = Date.now(); }catch(e){}
+  }
+  if (audioCtx && audioCtx.state === "suspended") audioCtx.resume().catch(() => {});
 }
 function micErrorMessage(e){
   const name = (e && e.name) || "";
@@ -390,6 +437,7 @@ function stop(){
   setStatus("最後の部分を確定中…");
   $("recBtn").disabled = true;
   stopAudio();
+  if (!ws || ws.readyState !== 1){ teardown(); return; }   // 再接続待ちの途中なら、そのまま終了
   try{ ws.send(""); }catch(e){}
   setTimeout(() => { if (ws) closeSocket(); }, 6000);   // 応答がなくても6秒で切る
 }
@@ -424,7 +472,10 @@ async function keepAwake(){
 }
 function releaseWake(){ try{ wakeLock && wakeLock.release(); }catch(e){} wakeLock = null; }
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && recording) keepAwake();
+  if (document.visibilityState === "visible" && recording){
+    keepAwake();
+    if (audioCtx && audioCtx.state !== "running") audioCtx.resume().catch(() => {});
+  }
   if (document.visibilityState === "hidden" && recording)
     notice("画面を切り替えたり消したりすると、スマホでは録音が止まることがあります。録音中はこのページを開いたままにしてください。");
 });
