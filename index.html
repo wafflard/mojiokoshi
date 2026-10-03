@@ -494,7 +494,7 @@ $("claudeBtn").addEventListener("click", () => {
   if (!t){ notice("まだ整形する内容がありません。"); return; }
   const d = new Date();
   const ymd = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
-  const text = "以下は面談の文字起こしです（" + ymd + "）。文字起こし整形スキルで整形したうえで、できるだけ詳しく議事録にまとめてください。\n\n---\n\n" + t;
+  const text = "以下は面談の文字起こしです（" + ymd + "）。文字起こし整形スキルで整形してください。\n\n---\n\n" + t;
   let copied = null;
   try{ copied = navigator.clipboard.writeText(text); }catch(e){ copied = Promise.reject(e); }
   copied.then(
