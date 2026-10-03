@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1c2430">
+<title>リアルタイム文字起こし</title>
+<style>
+/* Layout: one column — status bar, collapsible settings, transcript, fixed record bar at the bottom */
+:root{
+  --bg:#f3f5f7; --surface:#ffffff; --ink:#1c2430; --muted:#5f6b78; --line:#d9dee4;
+  --rec:#d23a2e; --rec-soft:#fbe5e2; --ok:#2e7d55; --pending:#9aa4ae;
+  --sp1:#2f5fa8; --sp2:#a0522d; --sp3:#2e7d55; --sp4:#7a4fa0; --sp5:#a07d1c;
+  --font:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#12171d; --surface:#1b222a; --ink:#e7ebef; --muted:#9aa6b2; --line:#2c3640;
+  --rec:#ef5b4d; --rec-soft:#3a201d; --ok:#6cc596; --pending:#6c7782;
+  --sp1:#7fa8e8; --sp2:#e0a07a; --sp3:#7fcfa2; --sp4:#c3a0e6; --sp5:#e2c76a;
+  color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 var(--font)}
+.wrap{max-width:760px;margin:0 auto;padding-inline:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(120px + env(safe-area-inset-bottom,0px))}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font-size:1.15rem;margin:0;letter-spacing:.02em}
+.status{font-size:.8rem;color:var(--muted);display:flex;align-items:center;gap:6px}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--pending)}
+.status.live .dot{background:var(--rec);animation:blink 1.2s infinite}
+.status.live{color:var(--rec)}
+@keyframes blink{50%{opacity:.3}}
+details{background:var(--surface);border:1px solid var(--line);border-radius:10px;margin-top:14px}
+summary{cursor:pointer;padding:10px 14px;font-weight:600;font-size:.9rem}
+.settings{padding:4px 14px 14px;display:flex;flex-direction:column;gap:12px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:.8rem;color:var(--muted)}
+input[type=password],input[type=text],textarea{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+textarea{min-height:90px;resize:vertical}
+.check{display:flex;align-items:center;gap:8px;font-size:.9rem}
+.hint{font-size:.75rem;color:var(--muted);margin:0}
+.meta{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:.8rem;color:var(--muted);margin-top:14px;font-family:var(--mono);font-variant-numeric:tabular-nums}
+#notice{margin-top:12px;font-size:.85rem;padding:10px 12px;border-radius:8px;background:var(--rec-soft);color:var(--ink)}
+.transcript{margin-top:16px;display:flex;flex-direction:column;gap:14px}
+.empty{color:var(--muted);font-size:.9rem;text-align:center;padding:40px 8px;border:1px dashed var(--line);border-radius:10px}
+.seg{display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
+.who{grid-column:1/-1;display:flex;align-items:baseline;gap:8px;font-size:.8rem}
+.who button{font:inherit;font-weight:700;background:none;border:0;padding:0;cursor:pointer;color:var(--c,var(--sp1));text-decoration:underline dotted;text-underline-offset:3px}
+.who time{color:var(--muted);font-family:var(--mono);font-size:.75rem}
+.txt{grid-column:1/-1;white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}
+.prov{color:var(--pending)}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px))}
+.bar-in{max-width:760px;margin:0 auto;display:flex;gap:8px;align-items:center}
+.rec{flex:1;font:inherit;font-weight:700;font-size:1rem;border:0;border-radius:999px;padding:14px;background:var(--rec);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px}
+.rec.stop{background:var(--ink);color:var(--surface)}
+.rec:disabled{opacity:.5;cursor:default}
+.sec{font:inherit;font-size:.85rem;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:12px 14px;cursor:pointer;white-space:nowrap}
+button:focus-visible,summary:focus-visible{outline:2px solid var(--sp1);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.status.live .dot{animation:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>リアルタイム文字起こし</h1>
+    <div class="status" id="status"><span class="dot"></span><span id="statusText">待機中</span></div>
+  </header>
+
+  <details id="settingsBox">
+    <summary>設定</summary>
+    <div class="settings">
+      <label class="f">Soniox APIキー
+        <input type="password" id="apiKey" autocomplete="off" placeholder="console.soniox.com で発行したキー">
+      </label>
+      <p class="hint">キーはこの端末のブラウザの中にだけ保存されます。ページのファイルには含まれません。</p>
+      <label class="f">固有名詞・専門用語（1行に1つ）
+        <textarea id="terms" placeholder="例：&#10;小川&#10;ビジョナリー学習塾&#10;志望理由書&#10;総合型選抜"></textarea>
+      </label>
+      <p class="hint">人名や塾の用語を入れておくと、誤変換が減ります。この端末にだけ保存されます。</p>
+      <label class="check"><input type="checkbox" id="diar" checked> 話者を区別する</label>
+      <label class="check"><input type="checkbox" id="wake" checked> 録音中は画面を消さない</label>
+    </div>
+  </details>
+
+  <div class="meta"><span id="elapsed">経過 0:00</span><span id="cost">料金の目安 約0円</span><span id="chars">0文字</span></div>
+  <div id="notice" hidden></div>
+
+  <div class="transcript" id="transcript">
+    <div class="empty" id="empty">「録音開始」を押して話すと、ここに文字が出てきます。<br>話者の名前をタップすると、名前を付けられます。</div>
+  </div>
+</div>
+
+<div class="bar"><div class="bar-in">
+  <button class="sec" id="copyBtn" type="button">コピー</button>
+  <button class="sec" id="saveBtn" type="button">保存</button>
+  <button class="rec" id="recBtn" type="button">● 録音開始</button>
+  <button class="sec" id="clearBtn" type="button">消去</button>
+</div></div>
+
+<script>
+"use strict";
+const RATE = 16000;               // 送信するサンプリングレート
+const USD_PER_HOUR = 0.12;        // Soniox stt-rt-v5
+const JPY = 150;                  // 1ドルの目安
+const STORE = "rtts.v1";
+
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(STORE + "." + k); return v == null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(STORE + "." + k, JSON.stringify(v)); }catch(e){} }
+};
+
+/* ---------- 状態 ---------- */
+let segments = store.get("segments", []);   // {speaker, text, startMs}
+let names = store.get("names", {});         // speaker -> 表示名
+let provisional = [];                       // まだ確定していないトークン
+let ws = null, audioCtx = null, mediaStream = null, proc = null, src = null;
+let recording = false, stopping = false, sessionStart = 0, elapsedTotal = store.get("elapsed", 0), timer = null, wakeLock = null;
+let sessionOffset = 0;
+
+/* ---------- 設定の保存 ---------- */
+$("apiKey").value = store.get("apiKey", "");
+$("terms").value = store.get("terms", "");
+$("diar").checked = store.get("diar", true);
+$("wake").checked = store.get("wake", true);
+$("apiKey").addEventListener("change", e => store.set("apiKey", e.target.value.trim()));
+$("terms").addEventListener("change", e => store.set("terms", e.target.value));
+$("diar").addEventListener("change", e => store.set("diar", e.target.checked));
+$("wake").addEventListener("change", e => store.set("wake", e.target.checked));
+if (!store.get("apiKey", "")) $("settingsBox").open = true;
+
+/* ---------- 表示 ---------- */
+const colors = ["--sp1","--sp2","--sp3","--sp4","--sp5"];
+function speakerName(sp){
+  if (!sp) return "話者";
+  return names[sp] || ("話者" + sp);
+}
+function speakerColor(sp){
+  const n = parseInt(sp, 10);
+  return "var(" + colors[(isNaN(n) ? 0 : n - 1) % colors.length] + ")";
+}
+function fmt(ms){
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return (h ? h + ":" + String(m).padStart(2,"0") : m) + ":" + String(x).padStart(2,"0");
+}
+function makeSegEl(seg, prov){
+  const el = document.createElement("div");
+  el.className = "seg";
+  const who = document.createElement("div"); who.className = "who";
+  const b = document.createElement("button"); b.type = "button";
+  b.style.setProperty("--c", speakerColor(seg.speaker));
+  b.textContent = speakerName(seg.speaker);
+  b.addEventListener("click", () => rename(seg.speaker));
+  const t = document.createElement("time"); t.textContent = fmt(seg.startMs);
+  who.append(b, t);
+  const txt = document.createElement("div"); txt.className = "txt" + (prov ? " prov" : "");
+  txt.textContent = seg.text;
+  el.append(who, txt);
+  return el;
+}
+function renderAll(){
+  const box = $("transcript");
+  box.querySelectorAll(".seg").forEach(n => n.remove());
+  segments.forEach(s => { s.el = makeSegEl(s, false); box.appendChild(s.el); });
+  renderProvisional();
+  $("empty").hidden = segments.length > 0;
+  updateMeta();
+}
+let provEls = [];
+function renderProvisional(){
+  provEls.forEach(e => e.remove()); provEls = [];
+  if (!provisional.length) return;
+  const box = $("transcript");
+  const last = segments[segments.length - 1];
+  // 最後の確定区間と同じ話者なら、その続きとして薄く表示
+  let groups = [];
+  provisional.forEach(tk => {
+    const g = groups[groups.length - 1];
+    if (g && g.speaker === tk.speaker) g.text += tk.text;
+    else groups.push({ speaker: tk.speaker, text: tk.text, startMs: tk.start_ms + sessionOffset });
+  });
+  groups.forEach((g, i) => {
+    if (i === 0 && last && last.speaker === g.speaker && last.el){
+      const span = document.createElement("span"); span.className = "prov"; span.textContent = g.text;
+      last.el.querySelector(".txt").appendChild(span); provEls.push(span);
+    } else {
+      const el = makeSegEl(g, true); box.appendChild(el); provEls.push(el);
+    }
+  });
+  $("empty").hidden = true;
+}
+function appendFinal(tokens){
+  const box = $("transcript");
+  let changedLast = false;
+  tokens.forEach(tk => {
+    const last = segments[segments.length - 1];
+    if (last && last.speaker === tk.speaker){
+      last.text += tk.text; changedLast = true;
+    } else {
+      if (changedLast && last && last.el) last.el.querySelector(".txt").textContent = last.text;
+      const seg = { speaker: tk.speaker, text: tk.text.replace(/^\s+/, ""), startMs: tk.start_ms + sessionOffset };
+      seg.el = makeSegEl(seg, false); box.appendChild(seg.el); segments.push(seg);
+      changedLast = false;
+    }
+  });
+  const last = segments[segments.length - 1];
+  if (last && last.el) last.el.querySelector(".txt").textContent = last.text;
+  $("empty").hidden = segments.length > 0;
+  saveSoon();
+}
+function rename(sp){
+  if (!sp) return;
+  const v = prompt("話者" + sp + " の名前を入力してください（例：小川、谷口先生）", names[sp] || "");
+  if (v == null) return;
+  if (v.trim()) names[sp] = v.trim(); else delete names[sp];
+  store.set("names", names);
+  renderAll();
+}
+let saveT = null;
+function saveSoon(){
+  clearTimeout(saveT);
+  saveT = setTimeout(() => {
+    store.set("segments", segments.map(s => ({ speaker: s.speaker, text: s.text, startMs: s.startMs })));
+  }, 800);
+  updateMeta();
+}
+function updateMeta(){
+  const ms = elapsedTotal + (recording ? Date.now() - sessionStart : 0);
+  $("elapsed").textContent = "経過 " + fmt(ms);
+  const yen = ms / 3600000 * USD_PER_HOUR * JPY;
+  $("cost").textContent = "料金の目安 約" + (yen < 10 ? yen.toFixed(1) : Math.round(yen)) + "円";
+  const n = segments.reduce((a, s) => a + s.text.length, 0);
+  $("chars").textContent = n.toLocaleString() + "文字";
+}
+function setStatus(text, live){
+  $("statusText").textContent = text;
+  $("status").classList.toggle("live", !!live);
+}
+function notice(msg){
+  const n = $("notice");
+  if (!msg){ n.hidden = true; return; }
+  n.textContent = msg; n.hidden = false;
+}
+function plainText(){
+  return segments.map(s => speakerName(s.speaker) + "（" + fmt(s.startMs) + "）：" + s.text.trim()).join("\n\n");
+}
+
+/* ---------- 音声の変換（ブラウザの音声 → 16kHz・16bit） ---------- */
+function makeResampler(inRate){
+  const ratio = inRate / RATE;
+  let pos = 0;           // 次の出力サンプルが始まる入力位置（前のチャンクからの続き）
+  let carry = new Float32Array(0);
+  return function(input){
+    const buf = new Float32Array(carry.length + input.length);
+    buf.set(carry); buf.set(input, carry.length);
+    const out = [];
+    while (pos + ratio <= buf.length){
+      const a = Math.floor(pos), b = Math.floor(pos + ratio);
+      let sum = 0, n = 0;
+      for (let i = a; i < b; i++){ sum += buf[i]; n++; }
+      out.push(n ? sum / n : buf[a]);
+      pos += ratio;
+    }
+    const keep = Math.floor(pos);
+    carry = buf.slice(keep);
+    pos -= keep;
+    const pcm = new Int16Array(out.length);
+    for (let i = 0; i < out.length; i++){
+      const v = Math.max(-1, Math.min(1, out[i]));
+      pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+    }
+    return pcm;
+  };
+}
+
+/* ---------- 録音と接続 ---------- */
+async function start(){
+  const key = $("apiKey").value.trim();
+  if (!key){ $("settingsBox").open = true; notice("最初に「設定」でSonioxのAPIキーを入力してください。"); $("apiKey").focus(); return; }
+  store.set("apiKey", key);
+  notice("");
+  $("recBtn").disabled = true;
+  setStatus("マイクを準備中…");
+  try{
+    mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+  }catch(e){
+    $("recBtn").disabled = false; setStatus("待機中");
+    notice(location.protocol === "file:" || location.protocol === "https:" || location.hostname === "localhost"
+      ? "マイクが使えませんでした。ブラウザの設定でこのページのマイクを許可してください。"
+      : "マイクが使えませんでした。スマホでは https:// で始まるアドレスでページを開く必要があります。");
+    return;
+  }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  await audioCtx.resume();
+  const resample = makeResampler(audioCtx.sampleRate);
+
+  const terms = $("terms").value.split(/\n/).map(s => s.trim()).filter(Boolean);
+  const config = {
+    api_key: key,
+    model: "stt-rt-v5",
+    audio_format: "pcm_s16le",
+    sample_rate: RATE,
+    num_channels: 1,
+    language_hints: ["ja", "en"],
+    enable_speaker_diarization: $("diar").checked,
+    enable_endpoint_detection: false
+  };
+  if (terms.length) config.context = { terms };
+
+  // 再開時は、前回までの経過時間の後ろに時刻をつなげる
+  sessionOffset = elapsedTotal;
+  stopping = false;
+  ws = new WebSocket("wss://stt-rt.soniox.com/transcribe-websocket");
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => {
+    ws.send(JSON.stringify(config));
+    src = audioCtx.createMediaStreamSource(mediaStream);
+    proc = audioCtx.createScriptProcessor(4096, 1, 1);
+    proc.onaudioprocess = ev => {
+      if (!ws || ws.readyState !== 1 || stopping) return;
+      const pcm = resample(ev.inputBuffer.getChannelData(0));
+      if (pcm.length) ws.send(pcm.buffer);
+    };
+    src.connect(proc); proc.connect(audioCtx.destination);
+    recording = true; sessionStart = Date.now();
+    timer = setInterval(updateMeta, 1000);
+    setStatus("録音中", true);
+    $("recBtn").disabled = false; $("recBtn").textContent = "■ 停止"; $("recBtn").classList.add("stop");
+    keepAwake();
+  };
+  ws.onmessage = ev => {
+    let r; try{ r = JSON.parse(ev.data); }catch(e){ return; }
+    if (r.error_code || r.error_message){
+      notice("Sonioxからエラーが返りました：" + (r.error_message || r.error_code) + explainError(r.error_code));
+      teardown(); return;
+    }
+    if (Array.isArray(r.tokens)){
+      const fin = [], prov = [];
+      r.tokens.forEach(tk => {
+        if (!tk.text || /^<\w+>$/.test(tk.text)) return;   // <end> などの制御用トークンは表示しない
+        (tk.is_final ? fin : prov).push(tk);
+      });
+      if (fin.length) appendFinal(fin);
+      provisional = prov;
+      renderProvisional();
+      if (fin.length || prov.length) window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+    }
+    if (r.finished){ provisional = []; renderProvisional(); closeSocket(); }
+  };
+  ws.onerror = () => { if (!stopping) notice("Sonioxにつながりませんでした。APIキーとネット接続を確認してください。"); };
+  ws.onclose = () => {
+    const wasUnexpected = recording && !stopping;
+    teardown();
+    if (wasUnexpected) notice("接続が切れました。ここまでの内容は残っています。もう一度「録音開始」で続きから記録できます。");
+  };
+}
+function explainError(code){
+  if (code == 401) return "（APIキーが正しくありません）";
+  if (code == 402) return "（残高が足りません。Sonioxの管理画面で支払い設定を確認してください）";
+  if (code == 429) return "（短時間に使いすぎています。少し待ってから試してください）";
+  return "";
+}
+function stop(){
+  if (!recording) return;
+  stopping = true;
+  setStatus("最後の部分を確定中…");
+  $("recBtn").disabled = true;
+  stopAudio();
+  try{ ws.send(""); }catch(e){}
+  setTimeout(() => { if (ws) closeSocket(); }, 6000);   // 応答がなくても6秒で切る
+}
+function stopAudio(){
+  try{ proc && proc.disconnect(); src && src.disconnect(); }catch(e){}
+  if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close().catch(() => {});
+  proc = src = mediaStream = audioCtx = null;
+}
+function closeSocket(){
+  try{ ws && ws.close(); }catch(e){}
+  teardown();
+}
+function teardown(){
+  if (recording){ elapsedTotal += Date.now() - sessionStart; store.set("elapsed", elapsedTotal); }
+  recording = false;
+  stopAudio();
+  clearInterval(timer);
+  if (ws){ ws.onclose = null; ws.onmessage = null; ws.onerror = null; }
+  ws = null;
+  if (provisional.length){ appendFinal(provisional); provisional = []; renderProvisional(); }
+  releaseWake();
+  setStatus("待機中");
+  $("recBtn").disabled = false; $("recBtn").textContent = "● 録音開始"; $("recBtn").classList.remove("stop");
+  updateMeta(); saveSoon();
+}
+
+/* ---------- 画面を消さない ---------- */
+async function keepAwake(){
+  if (!$("wake").checked || !("wakeLock" in navigator)) return;
+  try{ wakeLock = await navigator.wakeLock.request("screen"); }catch(e){}
+}
+function releaseWake(){ try{ wakeLock && wakeLock.release(); }catch(e){} wakeLock = null; }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && recording) keepAwake();
+  if (document.visibilityState === "hidden" && recording)
+    notice("画面を切り替えたり消したりすると、スマホでは録音が止まることがあります。録音中はこのページを開いたままにしてください。");
+});
+
+/* ---------- ボタン ---------- */
+$("recBtn").addEventListener("click", () => recording ? stop() : start());
+$("copyBtn").addEventListener("click", async () => {
+  const t = plainText();
+  if (!t){ notice("まだコピーする内容がありません。"); return; }
+  try{ await navigator.clipboard.writeText(t); notice("コピーしました。"); setTimeout(() => notice(""), 1500); }
+  catch(e){ const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); notice("コピーしました。"); }
+});
+$("saveBtn").addEventListener("click", async () => {
+  const t = plainText();
+  if (!t){ notice("まだ保存する内容がありません。"); return; }
+  const d = new Date();
+  const name = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") + "_文字起こし.txt";
+  const blob = new Blob([t], { type: "text/plain;charset=utf-8" });
+  const file = (typeof File === "function") ? new File([blob], name, { type: "text/plain" }) : null;
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })){
+    try{ await navigator.share({ files: [file], title: name }); return; }catch(e){ if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$("clearBtn").addEventListener("click", () => {
+  if (recording){ notice("録音中は消去できません。先に停止してください。"); return; }
+  if (!segments.length) return;
+  if (!confirm("文字起こしを全部消して、新しく始めますか？（話者の名前もリセットされます）")) return;
+  segments = []; names = {}; elapsedTotal = 0;
+  store.set("segments", []); store.set("names", {}); store.set("elapsed", 0);
+  renderAll(); notice("");
+});
+window.addEventListener("beforeunload", e => { if (recording){ e.preventDefault(); e.returnValue = ""; } });
+
+renderAll();
+if (segments.length) notice("前回の文字起こしが残っています。続きを録音するとこの後ろに追加されます。新しく始めるときは「消去」を押してください。");
+</script>
+</body>
+</html>
