@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1c2430">
+<title>話者分けツール</title>
+<style>
+/* Layout: one column — header/nav, setup card (speakers + pasted text), the colored transcript to mark up, fixed bar with speaker buttons */
+:root{
+  --bg:#f3f5f7; --surface:#ffffff; --ink:#1c2430; --muted:#5f6b78; --line:#d9dee4; --accent:#2f5fa8;
+  --s1:#2f5fa8; --s2:#b4532a; --s3:#2e7d55; --s4:#7a4fa0; --s5:#9a7410; --s6:#b23a6e;
+  --s1bg:#e3ebf8; --s2bg:#f8e6dc; --s3bg:#def1e6; --s4bg:#eee4f6; --s5bg:#f5ecd2; --s6bg:#f7e1ea;
+  --none:#8a949e; --nonebg:transparent; --warn-soft:#fbe5e2;
+  --font:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#12171d; --surface:#1b222a; --ink:#e7ebef; --muted:#9aa6b2; --line:#2c3640; --accent:#7fa8e8;
+  --s1:#8fb4ee; --s2:#eaa27c; --s3:#80d0a3; --s4:#c9a6ea; --s5:#e3c66a; --s6:#ee98bb;
+  --s1bg:#1f2d44; --s2bg:#3b261c; --s3bg:#1b3428; --s4bg:#2f2440; --s5bg:#352d14; --s6bg:#3a1f2b;
+  --none:#7c8792; --warn-soft:#3a201d;
+  color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 var(--font)}
+.wrap{max-width:820px;margin:0 auto;padding-inline:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(150px + env(safe-area-inset-bottom,0px))}
+header{display:flex;align-items:baseline;gap:8px 16px;flex-wrap:wrap}
+h1{font-size:1.15rem;margin:0;letter-spacing:.02em}
+nav{display:flex;gap:12px;font-size:.8rem}
+nav a{color:var(--accent)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;margin-top:14px;padding:14px;display:flex;flex-direction:column;gap:12px}
+.card h2{font-size:.95rem;margin:0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:.8rem;color:var(--muted)}
+select,input[type=text],textarea{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+textarea{width:100%;min-height:160px;resize:vertical}
+.names{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.names label{display:flex;align-items:center;gap:6px}
+.names input{width:100%;min-width:0}
+.sw{width:12px;height:12px;border-radius:3px;flex:none}
+.hint{font-size:.78rem;color:var(--muted);margin:0}
+.btn{font:inherit;font-size:.9rem;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:9px 16px;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--surface);font-weight:700}
+.tabs{display:flex;gap:4px;margin-top:16px;border-bottom:1px solid var(--line)}
+.tab{font:inherit;font-size:.85rem;background:none;border:0;border-bottom:2px solid transparent;padding:8px 12px;color:var(--muted);cursor:pointer}
+.tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--accent);font-weight:700}
+.meta{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:.8rem;color:var(--muted);margin-top:10px;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.meter{height:5px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}
+.meter i{display:block;height:100%;width:0;background:var(--accent)}
+#editor{margin-top:12px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;white-space:pre-wrap;overflow-wrap:anywhere;line-height:2;user-select:text;-webkit-user-select:text;cursor:text;min-height:120px}
+#editor span{border-radius:3px;padding:1px 0}
+#editor span.n{color:var(--none)}
+#editor span[data-label]::before{content:attr(data-label);display:inline-block;font-size:.7rem;font-weight:700;line-height:1.5;padding:0 6px;margin:0 4px 0 2px;border-radius:999px;color:var(--surface);background:var(--c);user-select:none;-webkit-user-select:none;vertical-align:1px}
+#result{margin-top:12px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}
+#notice{margin-top:12px;font-size:.85rem;padding:10px 12px;border-radius:8px;background:var(--warn-soft)}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:8px}
+.bar-in{max-width:820px;margin:0 auto;width:100%;display:flex;gap:6px;flex-wrap:wrap}
+.sp{flex:1 1 0;min-width:84px;font:inherit;font-size:.85rem;font-weight:700;border:2px solid var(--c);background:var(--cbg);color:var(--c);border-radius:10px;padding:8px 6px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sp kbd{font:600 .7rem var(--mono);opacity:.75}
+.sp.clear{--c:var(--none);--cbg:var(--bg);font-weight:500}
+.tool{flex:1 1 0;font:inherit;font-size:.8rem;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:8px 6px;cursor:pointer;white-space:nowrap}
+.tool.main{font-weight:700;border-color:var(--accent);color:var(--accent)}
+@media (max-width:600px), (pointer:coarse){.keys,.sp kbd{display:none}}
+button:focus-visible,a:focus-visible,.tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>話者分けツール</h1>
+    <nav><a href="./">リアルタイム文字起こし</a><a href="./file.html">録音ファイル文字起こし</a></nav>
+  </header>
+
+  <section class="card" id="setup">
+    <h2>1. 話者と文字起こしを入れる</h2>
+    <div class="row">
+      <label class="f">話者の人数
+        <select id="count"><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option></select>
+      </label>
+    </div>
+    <div class="names" id="names"></div>
+    <label class="f">文字起こしのテキスト
+      <textarea id="input" placeholder="ここに文字起こしを貼り付けてください"></textarea>
+    </label>
+    <div class="row"><button class="btn primary" id="startBtn" type="button">話者分けを始める</button></div>
+  </section>
+
+  <section id="work" hidden>
+    <div class="tabs" role="tablist">
+      <button class="tab" id="tabEdit" role="tab" aria-selected="true" type="button">振り分け</button>
+      <button class="tab" id="tabResult" role="tab" aria-selected="false" type="button">結果</button>
+      <button class="tab" id="tabSetup" role="tab" aria-selected="false" type="button">話者・テキストの変更</button>
+    </div>
+    <div class="meta"><span id="mDone">振り分け済み 0%</span><span id="mTurns">発言 0</span><span class="keys">キー 1〜6：話者 ／ 0：解除 ／ Ctrl+Z：取り消し</span></div>
+    <div class="meter"><i id="meter"></i></div>
+    <p class="hint" id="howto" style="margin-top:8px">文章をドラッグして選び、下の話者ボタンを押すと、その範囲がその話者になります。選ばずに<strong>話者が切り替わる位置をクリック</strong>してボタンを押すと、そこから次の区切りまでがその話者になります。</p>
+    <div id="notice" hidden></div>
+    <div id="editor" aria-label="文字起こし"></div>
+    <pre id="result" hidden></pre>
+  </section>
+</div>
+
+<div class="bar" id="bar" hidden>
+  <div class="bar-in" id="spButtons"></div>
+  <div class="bar-in">
+    <button class="tool" id="undoBtn" type="button">取り消し</button>
+    <button class="tool main" id="claudeBtn" type="button">整形用にコピー</button>
+    <button class="tool" id="copyBtn" type="button">コピー</button>
+    <button class="tool" id="saveBtn" type="button">保存</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+const STORE = "spk.v1";
+const MAX = 6;
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(STORE + "." + k); return v == null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(STORE + "." + k, JSON.stringify(v)); }catch(e){} }
+};
+
+/* ---------- 状態 ----------
+   text：文字起こし全文
+   markers：[{pos, sp}] … pos の文字から先は話者 sp（sp が null なら未指定）。次の区切りまで続く */
+let text = store.get("text", "");
+let count = store.get("count", 2);
+let names = store.get("names", []);
+let markers = store.get("markers", []);
+let undoStack = [];
+let lastSel = null;   // 最後に選んだ範囲 {a, b}
+
+function save(){ store.set("text", text); store.set("count", count); store.set("names", names); store.set("markers", markers); }
+const nameOf = i => (names[i] && names[i].trim()) || ("話者" + (i + 1));
+
+/* ---------- 区切りの操作 ---------- */
+function speakerAt(i){
+  let sp = null;
+  for (const m of markers){ if (m.pos <= i) sp = m.sp; else break; }
+  return sp;
+}
+function normalize(){
+  markers.sort((x, y) => x.pos - y.pos);
+  const out = []; let prev = null;
+  for (const m of markers){
+    if (m.pos < 0 || m.pos >= text.length) continue;
+    if (out.length && out[out.length - 1].pos === m.pos){ out[out.length - 1] = m; prev = out.length > 1 ? out[out.length - 2].sp : null; }
+    else out.push(m);
+    // 直前と同じ話者の区切りは不要
+    const cur = out[out.length - 1], before = out.length > 1 ? out[out.length - 2].sp : null;
+    if (cur.sp === before) out.pop();
+    prev = out.length ? out[out.length - 1].sp : null;
+  }
+  markers = out;
+}
+function pushUndo(){ undoStack.push(JSON.stringify(markers)); if (undoStack.length > 200) undoStack.shift(); }
+function assignRange(a, b, sp){
+  const after = b < text.length ? speakerAt(b) : null;
+  markers = markers.filter(m => m.pos < a || m.pos > b);
+  markers.push({ pos: a, sp });
+  if (b < text.length) markers.push({ pos: b, sp: after });
+  normalize();
+}
+function assignFrom(a, sp){
+  markers = markers.filter(m => m.pos !== a);
+  markers.push({ pos: a, sp });
+  normalize();
+}
+// 選択の端にある空白・改行は含めない
+function trimRange(a, b){
+  while (a < b && /\s/.test(text[a])) a++;
+  while (b > a && /\s/.test(text[b - 1])) b--;
+  return [a, b];
+}
+// クリックした位置が空白や改行の直前なら、次の文字に合わせる
+function snapCaret(a){
+  while (a < text.length && /\s/.test(text[a])) a++;
+  return a;
+}
+
+/* ---------- 表示 ---------- */
+function segments(){
+  const segs = [];
+  let start = 0, sp = null;
+  for (const m of markers){
+    if (m.pos > start) segs.push({ s: start, e: m.pos, sp });
+    start = m.pos; sp = m.sp;
+  }
+  if (start < text.length) segs.push({ s: start, e: text.length, sp });
+  return segs;
+}
+function renderEditor(){
+  const ed = $("editor");
+  ed.textContent = "";
+  let prevSp;
+  for (const g of segments()){
+    const span = document.createElement("span");
+    span.dataset.s = g.s;
+    span.textContent = text.slice(g.s, g.e);
+    if (g.sp == null){ span.className = "n"; }
+    else {
+      const k = (g.sp % MAX) + 1;
+      span.style.setProperty("--c", "var(--s" + k + ")");
+      span.style.background = "var(--s" + k + "bg)";
+      if (g.sp !== prevSp) span.dataset.label = nameOf(g.sp);
+    }
+    prevSp = g.sp;
+    ed.appendChild(span);
+  }
+  updateMeta();
+}
+function joinLines(t){
+  // 発言の中の改行は詰める（英数字どうしの間だけ空白を入れる）
+  return t.trim().replace(/\s*\n+\s*/g, (m, off, str) => {
+    const a = str[off - 1] || "", b = str[off + m.length] || "";
+    return /[A-Za-z0-9]/.test(a) && /[A-Za-z0-9]/.test(b) ? " " : "";
+  });
+}
+function resultText(){
+  const turns = [];
+  for (const g of segments()){
+    const t = text.slice(g.s, g.e);
+    if (!t.trim()) continue;
+    const who = g.sp == null ? "（話者未指定）" : nameOf(g.sp);
+    const last = turns[turns.length - 1];
+    if (last && last.who === who) last.t += t; else turns.push({ who, t });
+  }
+  return turns.map(x => x.who + "：" + joinLines(x.t)).join("\n\n");
+}
+function updateMeta(){
+  let assigned = 0, turns = 0, prev;
+  for (const g of segments()){
+    const n = text.slice(g.s, g.e).replace(/\s/g, "").length;
+    if (g.sp != null) assigned += n;
+    if (n && g.sp !== prev){ turns++; prev = g.sp; }
+  }
+  const total = text.replace(/\s/g, "").length || 1;
+  const pct = Math.round(assigned / total * 100);
+  $("mDone").textContent = "振り分け済み " + pct + "%";
+  $("mTurns").textContent = "発言 " + turns;
+  $("meter").style.width = pct + "%";
+}
+function renderButtons(){
+  const box = $("spButtons");
+  box.textContent = "";
+  for (let i = 0; i < count; i++){
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "sp";
+    b.style.setProperty("--c", "var(--s" + (i + 1) + ")");
+    b.style.setProperty("--cbg", "var(--s" + (i + 1) + "bg)");
+    const nm = document.createElement("span"); nm.textContent = nameOf(i);
+    const kb = document.createElement("kbd"); kb.textContent = i + 1;
+    b.append(nm, kb);
+    b.addEventListener("pointerdown", e => e.preventDefault());   // ボタンを押しても選択が消えないように
+    b.addEventListener("click", () => apply(i));
+    box.appendChild(b);
+  }
+  const c = document.createElement("button");
+  c.type = "button"; c.className = "sp clear"; c.innerHTML = "解除 <kbd>0</kbd>";
+  c.addEventListener("pointerdown", e => e.preventDefault());
+  c.addEventListener("click", () => apply(null));
+  box.appendChild(c);
+}
+function renderNames(){
+  const box = $("names");
+  box.textContent = "";
+  for (let i = 0; i < count; i++){
+    const l = document.createElement("label");
+    const sw = document.createElement("span"); sw.className = "sw"; sw.style.background = "var(--s" + (i + 1) + ")";
+    const inp = document.createElement("input"); inp.type = "text"; inp.id = "name" + i;
+    inp.placeholder = "話者" + (i + 1) + "（例：" + ["小川", "生徒", "保護者", "講師", "社長", "ほか"][i] + "）";
+    inp.value = names[i] || "";
+    inp.addEventListener("input", () => { names[i] = inp.value; save(); renderButtons(); if (!$("work").hidden) renderEditor(); });
+    l.append(sw, inp); box.appendChild(l);
+  }
+}
+function notice(msg){ const n = $("notice"); if (!msg){ n.hidden = true; return; } n.textContent = msg; n.hidden = false; }
+
+/* ---------- 選択位置 → 文字の位置 ---------- */
+function posOf(node, offset){
+  const ed = $("editor");
+  if (node === ed){
+    const ch = ed.children[offset];
+    return ch ? +ch.dataset.s : text.length;
+  }
+  if (node.nodeType === 3){
+    const span = node.parentElement;
+    return +span.dataset.s + offset;
+  }
+  if (node.parentElement === ed && node.dataset){
+    return offset === 0 ? +node.dataset.s : +node.dataset.s + node.textContent.length;
+  }
+  return null;
+}
+function readSelection(){
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  if (!$("editor").contains(r.startContainer) || !$("editor").contains(r.endContainer)) return null;
+  const a = posOf(r.startContainer, r.startOffset), b = posOf(r.endContainer, r.endOffset);
+  if (a == null || b == null) return null;
+  return { a: Math.min(a, b), b: Math.max(a, b) };
+}
+document.addEventListener("selectionchange", () => { const s = readSelection(); if (s) lastSel = s; });
+
+function apply(sp){
+  const s = readSelection() || lastSel;
+  if (!s){ notice("先に、文章をドラッグして選ぶか、話者が切り替わる位置をクリックしてください。"); return; }
+  notice("");
+  pushUndo();
+  if (s.b > s.a){
+    const [a, b] = trimRange(s.a, s.b);
+    if (b <= a){ undoStack.pop(); return; }
+    assignRange(a, b, sp);
+  } else {
+    const a = snapCaret(s.a);
+    if (a >= text.length){ undoStack.pop(); return; }
+    assignFrom(a, sp);
+  }
+  lastSel = null;
+  const y = window.scrollY;
+  window.getSelection().removeAllRanges();
+  save(); renderEditor();
+  window.scrollTo(0, y);
+}
+function undo(){
+  if (!undoStack.length) return;
+  markers = JSON.parse(undoStack.pop());
+  save(); renderEditor();
+}
+
+/* ---------- 画面の切り替え ---------- */
+function showTab(which){
+  $("tabEdit").setAttribute("aria-selected", which === "edit");
+  $("tabResult").setAttribute("aria-selected", which === "result");
+  $("tabSetup").setAttribute("aria-selected", "false");
+  $("editor").hidden = which !== "edit";
+  $("howto").hidden = which !== "edit";
+  $("result").hidden = which !== "result";
+  if (which === "result") $("result").textContent = resultText() || "（まだ何もありません）";
+}
+function startWork(){
+  $("setup").hidden = true; $("work").hidden = false; $("bar").hidden = false;
+  renderButtons(); renderEditor(); showTab("edit");
+}
+$("startBtn").addEventListener("click", () => {
+  const t = $("input").value.replace(/\r\n?/g, "\n");
+  if (!t.trim()){ $("input").focus(); return; }
+  if (t !== text){
+    if (markers.length && !confirm("テキストが変わったため、これまでの振り分けはリセットされます。よろしいですか？")) return;
+    text = t; markers = []; undoStack = [];
+  }
+  save(); startWork();
+});
+$("tabEdit").addEventListener("click", () => showTab("edit"));
+$("tabResult").addEventListener("click", () => showTab("result"));
+$("tabSetup").addEventListener("click", () => {
+  $("setup").hidden = false; $("work").hidden = true; $("bar").hidden = true;
+  $("input").value = text; $("startBtn").textContent = "話者分けに戻る";
+  window.scrollTo(0, 0);
+});
+$("count").addEventListener("change", e => {
+  const n = +e.target.value;
+  const used = markers.reduce((m, x) => x.sp != null ? Math.max(m, x.sp + 1) : m, 0);
+  if (n < used && !confirm(n + "人にすると、話者" + (n + 1) + "以降に振り分けた部分は「未指定」に戻ります。よろしいですか？")){ e.target.value = count; return; }
+  count = n;
+  markers = markers.map(m => (m.sp != null && m.sp >= n) ? { pos: m.pos, sp: null } : m); normalize();
+  save(); renderNames(); renderButtons();
+});
+
+/* ---------- キー操作 ---------- */
+document.addEventListener("keydown", e => {
+  if ($("work").hidden || /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z"){ e.preventDefault(); undo(); return; }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (/^[1-6]$/.test(e.key) && +e.key <= count){ e.preventDefault(); apply(+e.key - 1); }
+  else if (e.key === "0"){ e.preventDefault(); apply(null); }
+});
+
+/* ---------- コピー・保存 ---------- */
+async function copyText(t, okMsg){
+  try{ await navigator.clipboard.writeText(t); notice(okMsg); }
+  catch(e){
+    const ta = document.createElement("textarea"); ta.value = t; document.body.appendChild(ta); ta.select();
+    let ok = false; try{ ok = document.execCommand("copy"); }catch(_){}
+    ta.remove(); notice(ok ? okMsg : "自動でコピーできませんでした。「結果」タブから手で選んでコピーしてください。");
+  }
+  setTimeout(() => notice(""), 2500);
+}
+$("undoBtn").addEventListener("pointerdown", e => e.preventDefault());
+$("undoBtn").addEventListener("click", undo);
+$("copyBtn").addEventListener("click", () => copyText(resultText(), "コピーしました。"));
+$("claudeBtn").addEventListener("click", () => {
+  const d = new Date();
+  const ymd = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  copyText("以下は手作業で話者を分けた文字起こしです（" + ymd + "）。話者の割り当てはそのままにして、文字起こし整形スキルで整形してください。\n\n---\n\n" + resultText(),
+           "整形の指示つきでコピーしました。Claudeに貼り付けて送信してください。");
+});
+$("saveBtn").addEventListener("click", async () => {
+  const t = resultText(); if (!t) return;
+  const d = new Date();
+  const name = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0") + "_話者別.txt";
+  const blob = new Blob([t], { type: "text/plain;charset=utf-8" });
+  const file = (typeof File === "function") ? new File([blob], name, { type: "text/plain" }) : null;
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })){
+    try{ await navigator.share({ files: [file], title: name }); return; }catch(e){ if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+/* ---------- 起動 ---------- */
+$("count").value = String(count);
+renderNames();
+$("input").value = text;
+if (text) startWork();
+</script>
+</body>
+</html>

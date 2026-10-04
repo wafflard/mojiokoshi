@@ -25,7 +25,8 @@ html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 var(--fo
 .wrap{max-width:760px;margin:0 auto;padding-inline:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(170px + env(safe-area-inset-bottom,0px))}
 header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 h1{font-size:1.15rem;margin:0;letter-spacing:.02em}
-.switch{font-size:.8rem;color:var(--sp1);margin-right:auto}
+.switch{font-size:.8rem;color:var(--sp1)}
+.switch:last-of-type{margin-right:auto}
 .status{font-size:.8rem;color:var(--muted);display:flex;align-items:center;gap:6px}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--pending)}
 .status.live .dot{background:var(--rec);animation:blink 1.2s infinite}
@@ -66,7 +67,7 @@ button:focus-visible,summary:focus-visible{outline:2px solid var(--sp1);outline-
 <div class="wrap">
   <header>
     <h1>リアルタイム文字起こし</h1>
-    <a class="switch" href="./file.html">録音ファイルから →</a>
+    <a class="switch" href="./file.html">録音ファイルから →</a><a class="switch" href="./speaker.html">話者分け →</a>
     <div class="status" id="status"><span class="dot"></span><span id="statusText">待機中</span></div>
   </header>
 
