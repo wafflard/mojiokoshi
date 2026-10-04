@@ -20,6 +20,7 @@
   --sp1:#7fa8e8; --sp2:#e0a07a; --sp3:#7fcfa2; --sp4:#c3a0e6; --sp5:#e2c76a;
   color-scheme:dark}}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 var(--font)}
 .wrap{max-width:760px;margin:0 auto;padding-inline:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(170px + env(safe-area-inset-bottom,0px))}
 header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
@@ -33,7 +34,7 @@ details{background:var(--surface);border:1px solid var(--line);border-radius:10p
 summary{cursor:pointer;padding:10px 14px;font-weight:600;font-size:.9rem}
 .settings{padding:4px 14px 14px;display:flex;flex-direction:column;gap:12px}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:.8rem;color:var(--muted)}
-input[type=password],input[type=text],textarea{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+select,input[type=password],input[type=text],textarea{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
 textarea{min-height:90px;resize:vertical}
 .check{display:flex;align-items:center;gap:8px;font-size:.9rem}
 .hint{font-size:.75rem;color:var(--muted);margin:0}
@@ -78,6 +79,14 @@ button:focus-visible,summary:focus-visible{outline:2px solid var(--sp1);outline-
         <textarea id="terms" placeholder="例：&#10;小川&#10;ビジョナリー学習塾&#10;志望理由書&#10;総合型選抜"></textarea>
       </label>
       <p class="hint">人名や塾の用語を入れておくと、誤変換が減ります。この端末にだけ保存されます。</p>
+      <label class="f" id="srcRow">録音する音
+        <select id="source">
+          <option value="mic">マイクだけ（対面の面談）</option>
+          <option value="both">マイク＋PCの音（オンライン面談）</option>
+          <option value="sys">PCの音だけ（動画・配信など）</option>
+        </select>
+      </label>
+      <p class="hint" id="srcHint">PCの音を録るときは、録音開始後に出る画面で共有するタブか画面を選び、「音声を共有」をオンにしてください。マイクも使う場合は、相手の声が二重に拾われないようイヤホンを使うのがおすすめです。</p>
       <label class="check"><input type="checkbox" id="diar" checked> 話者を区別する</label>
       <label class="check"><input type="checkbox" id="wake" checked> 録音中は画面を消さない</label>
     </div>
@@ -121,6 +130,9 @@ let segments = store.get("segments", []);   // {speaker, text, startMs}
 let names = store.get("names", {});         // speaker -> 表示名
 let provisional = [];                       // まだ確定していないトークン
 let ws = null, audioCtx = null, mediaStream = null, proc = null, src = null;
+let displayStream = null, sysSrc = null, mixer = null;
+// PCの音（画面共有の音声）はパソコンのブラウザでだけ使える。スマホでは選択肢を出さない
+const canCaptureSystem = !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) && !/Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 let recording = false, stopping = false, sessionStart = 0, elapsedTotal = store.get("elapsed", 0), timer = null, wakeLock = null;
 let sessionOffset = 0;
 
@@ -133,6 +145,9 @@ $("apiKey").addEventListener("change", e => store.set("apiKey", e.target.value.t
 $("terms").addEventListener("change", e => store.set("terms", e.target.value));
 $("diar").addEventListener("change", e => store.set("diar", e.target.checked));
 $("wake").addEventListener("change", e => store.set("wake", e.target.checked));
+$("source").value = store.get("source", "mic");
+$("source").addEventListener("change", e => store.set("source", e.target.value));
+if (!canCaptureSystem){ $("srcRow").hidden = true; $("srcHint").hidden = true; }
 if (!store.get("apiKey", "")) $("settingsBox").open = true;
 
 /* ---------- 表示 ---------- */
@@ -287,19 +302,53 @@ async function start(){
   store.set("apiKey", key);
   notice("");
   $("recBtn").disabled = true;
-  setStatus("マイクを準備中…");
-  try{
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error("no mediaDevices"), { name: "NoMediaDevices" });
+  const source = canCaptureSystem ? $("source").value : "mic";
+  const wantSys = source !== "mic", wantMic = source !== "sys";
+
+  // PCの音（画面共有の音声）を先に取る：共有画面はクリック直後でないと出せないため
+  if (wantSys){
+    setStatus("共有する画面を選択中…");
     try{
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-    }catch(e1){
-      if (e1.name === "NotAllowedError" || e1.name === "SecurityError") throw e1;
-      mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });   // 細かい指定を受け付けない端末向け
+      displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+        systemAudio: "include"
+      });
+    }catch(e){
+      $("recBtn").disabled = false; setStatus("待機中");
+      notice(e && e.name === "NotAllowedError" ? "画面の共有がキャンセルされました。" : "PCの音を取り込めませんでした。（エラー：" + ((e && e.name) || e) + "）");
+      return;
     }
-  }catch(e){
-    $("recBtn").disabled = false; setStatus("待機中");
-    notice(micErrorMessage(e));
-    return;
+    if (!displayStream.getAudioTracks().length){
+      displayStream.getTracks().forEach(t => t.stop()); displayStream = null;
+      $("recBtn").disabled = false; setStatus("待機中");
+      notice("PCの音が共有されませんでした。もう一度「録音開始」を押し、共有の画面で「音声を共有」（タブの場合は「タブの音声も共有する」）をオンにしてください。");
+      return;
+    }
+    // 映像は使わないので止めておく（音声だけ残る）
+    displayStream.getVideoTracks().forEach(t => { t.enabled = false; });
+    // 共有を「停止」されたら録音も止める
+    displayStream.getAudioTracks()[0].addEventListener("ended", () => {
+      if (recording){ stop(); notice("PCの音の共有が終了したため、録音を止めました。"); }
+    });
+  }
+
+  if (wantMic){
+    setStatus("マイクを準備中…");
+    try{
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error("no mediaDevices"), { name: "NoMediaDevices" });
+      try{
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+      }catch(e1){
+        if (e1.name === "NotAllowedError" || e1.name === "SecurityError") throw e1;
+        mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });   // 細かい指定を受け付けない端末向け
+      }
+    }catch(e){
+      if (displayStream){ displayStream.getTracks().forEach(t => t.stop()); displayStream = null; }
+      $("recBtn").disabled = false; setStatus("待機中");
+      notice(micErrorMessage(e));
+      return;
+    }
   }
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   await audioCtx.resume();
@@ -324,14 +373,20 @@ async function start(){
   reconnects = 0;
   currentConfig = config;
   // マイクの処理は接続が切れても止めず、つなぎ直したソケットへそのまま送り続ける
-  src = audioCtx.createMediaStreamSource(mediaStream);
+  // マイクとPCの音を1本に混ぜてから送る
+  mixer = audioCtx.createGain();
+  if (mediaStream){ src = audioCtx.createMediaStreamSource(mediaStream); src.connect(mixer); }
+  if (displayStream){
+    sysSrc = audioCtx.createMediaStreamSource(new MediaStream(displayStream.getAudioTracks()));
+    sysSrc.connect(mixer);
+  }
   proc = audioCtx.createScriptProcessor(4096, 1, 1);
   proc.onaudioprocess = ev => {
     const pcm = resample(ev.inputBuffer.getChannelData(0));
     if (!ws || ws.readyState !== 1 || stopping || !pcm.length) return;
     ws.send(pcm.buffer); lastSent = Date.now();
   };
-  src.connect(proc); proc.connect(audioCtx.destination);
+  mixer.connect(proc); proc.connect(audioCtx.destination);
   openSocket(true);
 }
 
@@ -442,10 +497,11 @@ function stop(){
   setTimeout(() => { if (ws) closeSocket(); }, 6000);   // 応答がなくても6秒で切る
 }
 function stopAudio(){
-  try{ proc && proc.disconnect(); src && src.disconnect(); }catch(e){}
+  try{ proc && proc.disconnect(); src && src.disconnect(); sysSrc && sysSrc.disconnect(); mixer && mixer.disconnect(); }catch(e){}
   if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+  if (displayStream) displayStream.getTracks().forEach(t => t.stop());
   if (audioCtx) audioCtx.close().catch(() => {});
-  proc = src = mediaStream = audioCtx = null;
+  proc = src = sysSrc = mixer = mediaStream = displayStream = audioCtx = null;
 }
 function closeSocket(){
   try{ ws && ws.close(); }catch(e){}
