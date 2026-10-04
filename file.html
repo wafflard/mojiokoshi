@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1c2430">
+<title>録音ファイル文字起こし</title>
+<style>
+/* Layout: one column — header with page switch, settings, file drop zone, progress, transcript, fixed tool bar */
+:root{
+  --bg:#f3f5f7; --surface:#ffffff; --ink:#1c2430; --muted:#5f6b78; --line:#d9dee4;
+  --rec:#d23a2e; --rec-soft:#fbe5e2; --ok:#2e7d55; --pending:#9aa4ae;
+  --sp1:#2f5fa8; --sp2:#a0522d; --sp3:#2e7d55; --sp4:#7a4fa0; --sp5:#a07d1c;
+  --font:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic UI","Meiryo",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){:root{
+  --bg:#12171d; --surface:#1b222a; --ink:#e7ebef; --muted:#9aa6b2; --line:#2c3640;
+  --rec:#ef5b4d; --rec-soft:#3a201d; --ok:#6cc596; --pending:#6c7782;
+  --sp1:#7fa8e8; --sp2:#e0a07a; --sp3:#7fcfa2; --sp4:#c3a0e6; --sp5:#e2c76a;
+  color-scheme:dark}}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.75 var(--font)}
+.wrap{max-width:760px;margin:0 auto;padding-inline:16px;padding-top:calc(16px + env(safe-area-inset-top,0px));padding-bottom:calc(110px + env(safe-area-inset-bottom,0px))}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+h1{font-size:1.15rem;margin:0;letter-spacing:.02em}
+.switch{font-size:.8rem;color:var(--sp1)}
+details{background:var(--surface);border:1px solid var(--line);border-radius:10px;margin-top:14px}
+summary{cursor:pointer;padding:10px 14px;font-weight:600;font-size:.9rem}
+.settings{padding:4px 14px 14px;display:flex;flex-direction:column;gap:12px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:.8rem;color:var(--muted)}
+input[type=password],textarea{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+textarea{min-height:90px;resize:vertical}
+.check{display:flex;align-items:center;gap:8px;font-size:.9rem}
+.hint{font-size:.75rem;color:var(--muted);margin:0}
+.drop{display:block;margin-top:14px;border:2px dashed var(--line);border-radius:12px;background:var(--surface);padding:28px 16px;text-align:center;cursor:pointer}
+.drop:hover,.drop.over,.drop:focus-visible{border-color:var(--sp1);outline:none}
+.drop strong{display:block}
+.drop span{font-size:.8rem;color:var(--muted)}
+.progress{margin-top:14px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.progress .row{display:flex;justify-content:space-between;gap:8px;font-size:.85rem}
+.progress .name{font-weight:600;overflow-wrap:anywhere;min-width:0}
+.progress .step{color:var(--muted);white-space:nowrap}
+.bar-track{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:8px}
+.bar-track i{display:block;height:100%;width:0;background:var(--sp1);transition:width .3s}
+.meta{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:.8rem;color:var(--muted);margin-top:14px;font-family:var(--mono);font-variant-numeric:tabular-nums}
+#notice{margin-top:12px;font-size:.85rem;padding:10px 12px;border-radius:8px;background:var(--rec-soft);color:var(--ink)}
+.transcript{margin-top:16px;display:flex;flex-direction:column;gap:14px}
+.empty{color:var(--muted);font-size:.9rem;text-align:center;padding:32px 8px;border:1px dashed var(--line);border-radius:10px}
+.seg{display:flex;flex-direction:column;gap:2px}
+.who{display:flex;align-items:baseline;gap:8px;font-size:.8rem}
+.who button{font:inherit;font-weight:700;background:none;border:0;padding:0;cursor:pointer;color:var(--c,var(--sp1));text-decoration:underline dotted;text-underline-offset:3px}
+.who time{color:var(--muted);font-family:var(--mono);font-size:.75rem}
+.txt{white-space:pre-wrap;overflow-wrap:anywhere;min-width:0}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px))}
+.bar-in{max-width:760px;margin:0 auto;display:flex;gap:8px}
+.sec{flex:1;font:inherit;font-size:.8rem;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:11px 6px;cursor:pointer;white-space:nowrap}
+.sec.main{flex:1.6;font-weight:700;border-color:var(--sp1);color:var(--sp1)}
+button:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var(--sp1);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>録音ファイル文字起こし</h1>
+    <a class="switch" href="./">リアルタイム文字起こしへ →</a>
+  </header>
+
+  <details id="settingsBox">
+    <summary>設定</summary>
+    <div class="settings">
+      <label class="f">Soniox APIキー
+        <input type="password" id="apiKey" autocomplete="off" placeholder="console.soniox.com で発行したキー">
+      </label>
+      <p class="hint">リアルタイム文字起こしのページと共通です。この端末のブラウザの中にだけ保存されます。</p>
+      <label class="f">固有名詞・専門用語（1行に1つ）
+        <textarea id="terms" placeholder="例：&#10;小川&#10;ビジョナリー学習塾&#10;志望理由書"></textarea>
+      </label>
+      <label class="check"><input type="checkbox" id="diar" checked> 話者を区別する</label>
+    </div>
+  </details>
+
+  <label class="drop" id="drop" tabindex="0">
+    <strong>録音ファイルをここにドラッグ、またはタップして選択</strong>
+    <span>mp3・m4a・wav・mp4・webm など ／ 文字起こしが終わると、ファイルはSonioxから削除します</span>
+    <input type="file" id="file" accept="audio/*,video/*,.m4a,.mp3,.wav,.mp4,.webm,.aac,.flac,.ogg" hidden>
+  </label>
+
+  <div class="progress" id="progress" hidden>
+    <div class="row"><span class="name" id="pName"></span><span class="step" id="pStep"></span></div>
+    <div class="bar-track"><i id="pBar"></i></div>
+  </div>
+
+  <div class="meta" id="meta" hidden><span id="mLen"></span><span id="mCost"></span><span id="mChars"></span></div>
+  <div id="notice" hidden></div>
+
+  <div class="transcript" id="transcript">
+    <div class="empty" id="empty">ファイルを選ぶと文字起こしが始まります。<br>話者の名前をタップすると、名前を付けられます。</div>
+  </div>
+</div>
+
+<div class="bar"><div class="bar-in">
+  <button class="sec main" id="claudeBtn" type="button">整形用にコピー</button>
+  <button class="sec" id="copyBtn" type="button">コピー</button>
+  <button class="sec" id="saveBtn" type="button">保存</button>
+  <button class="sec" id="clearBtn" type="button">消去</button>
+</div></div>
+
+<script>
+"use strict";
+const API = "https://api.soniox.com/v1";
+const USD_PER_HOUR = 0.10;   // stt-async-v5
+const JPY = 150;
+const STORE = "rtts.v1";     // リアルタイムのページと設定を共有する
+
+const $ = id => document.getElementById(id);
+const store = {
+  get(k, d){ try{ const v = localStorage.getItem(STORE + "." + k); return v == null ? d : JSON.parse(v); }catch(e){ return d; } },
+  set(k, v){ try{ localStorage.setItem(STORE + "." + k, JSON.stringify(v)); }catch(e){} }
+};
+
+let segments = store.get("file.segments", []);   // {speaker, text, startMs}
+let names = store.get("file.names", {});
+let meta = store.get("file.meta", null);           // {fileName, durationMs}
+let busy = false;
+
+/* ---------- 設定 ---------- */
+$("apiKey").value = store.get("apiKey", "");
+$("terms").value = store.get("terms", "");
+$("diar").checked = store.get("diar", true);
+$("apiKey").addEventListener("change", e => store.set("apiKey", e.target.value.trim()));
+$("terms").addEventListener("change", e => store.set("terms", e.target.value));
+$("diar").addEventListener("change", e => store.set("diar", e.target.checked));
+if (!store.get("apiKey", "")) $("settingsBox").open = true;
+
+/* ---------- 表示 ---------- */
+const colors = ["--sp1","--sp2","--sp3","--sp4","--sp5"];
+const speakerName = sp => sp ? (names[sp] || "話者" + sp) : "話者";
+const speakerColor = sp => { const n = parseInt(sp, 10); return "var(" + colors[(isNaN(n) ? 0 : n - 1) % colors.length] + ")"; };
+function fmt(ms){
+  const s = Math.max(0, Math.floor((ms || 0) / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60;
+  return (h ? h + ":" + String(m).padStart(2,"0") : m) + ":" + String(x).padStart(2,"0");
+}
+function notice(msg){ const n = $("notice"); if (!msg){ n.hidden = true; return; } n.textContent = msg; n.hidden = false; }
+function render(){
+  const box = $("transcript");
+  box.querySelectorAll(".seg").forEach(n => n.remove());
+  segments.forEach(seg => {
+    const el = document.createElement("div"); el.className = "seg";
+    const who = document.createElement("div"); who.className = "who";
+    const b = document.createElement("button"); b.type = "button";
+    b.style.setProperty("--c", speakerColor(seg.speaker));
+    b.textContent = speakerName(seg.speaker);
+    b.addEventListener("click", () => rename(seg.speaker));
+    const t = document.createElement("time"); t.textContent = fmt(seg.startMs);
+    who.append(b, t);
+    const txt = document.createElement("div"); txt.className = "txt"; txt.textContent = seg.text;
+    el.append(who, txt); box.appendChild(el);
+  });
+  $("empty").hidden = segments.length > 0;
+  if (meta){
+    $("meta").hidden = false;
+    $("mLen").textContent = meta.durationMs ? "長さ " + fmt(meta.durationMs) : meta.fileName;
+    const yen = (meta.durationMs || 0) / 3600000 * USD_PER_HOUR * JPY;
+    $("mCost").textContent = meta.durationMs ? "料金の目安 約" + (yen < 10 ? yen.toFixed(1) : Math.round(yen)) + "円" : "";
+    $("mChars").textContent = segments.reduce((a, s) => a + s.text.length, 0).toLocaleString() + "文字";
+  } else $("meta").hidden = true;
+}
+function rename(sp){
+  if (!sp) return;
+  const v = prompt("話者" + sp + " の名前を入力してください（例：小川、谷口先生）", names[sp] || "");
+  if (v == null) return;
+  if (v.trim()) names[sp] = v.trim(); else delete names[sp];
+  store.set("file.names", names); render();
+}
+function plainText(){
+  return segments.map(s => speakerName(s.speaker) + "（" + fmt(s.startMs) + "）：" + s.text.trim()).join("\n\n");
+}
+function progress(name, step, pct){
+  $("progress").hidden = false;
+  if (name != null) $("pName").textContent = name;
+  $("pStep").textContent = step;
+  $("pBar").style.width = pct + "%";
+}
+
+/* ---------- トークン → 話者ごとの段落 ---------- */
+function toSegments(tokens){
+  const out = [];
+  tokens.forEach(tk => {
+    if (!tk.text || /^<\w+>$/.test(tk.text)) return;
+    if (tk.translation_status === "translation") return;
+    const sp = tk.speaker != null ? String(tk.speaker) : "";
+    const last = out[out.length - 1];
+    if (last && last.speaker === sp) last.text += tk.text;
+    else out.push({ speaker: sp, text: tk.text.replace(/^\s+/, ""), startMs: tk.start_ms || 0 });
+  });
+  return out;
+}
+
+/* ---------- Soniox API ---------- */
+async function api(path, key, opts = {}){
+  let res;
+  try{
+    res = await fetch(API + path, { ...opts, headers: { Authorization: "Bearer " + key, ...(opts.headers || {}) } });
+  }catch(e){
+    const err = new Error("network"); err.network = true; throw err;
+  }
+  if (!res.ok){
+    let msg = "";
+    try{ const j = await res.json(); msg = j.message || j.error_message || j.error || JSON.stringify(j); }catch(e){ try{ msg = await res.text(); }catch(_){} }
+    const err = new Error(msg || ("HTTP " + res.status)); err.status = res.status; throw err;
+  }
+  return res.status === 204 ? null : res.json();
+}
+function uploadWithProgress(file, key, onPct){
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", API + "/files");
+    xhr.setRequestHeader("Authorization", "Bearer " + key);
+    xhr.upload.onprogress = e => { if (e.lengthComputable) onPct(e.loaded / e.total); };
+    xhr.onload = () => {
+      let j = null; try{ j = JSON.parse(xhr.responseText); }catch(e){}
+      if (xhr.status >= 200 && xhr.status < 300 && j) resolve(j);
+      else { const err = new Error((j && (j.message || j.error)) || ("HTTP " + xhr.status)); err.status = xhr.status; reject(err); }
+    };
+    xhr.onerror = () => { const err = new Error("network"); err.network = true; reject(err); };
+    const fd = new FormData(); fd.append("file", file, file.name);
+    xhr.send(fd);
+  });
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function transcribe(file){
+  const key = $("apiKey").value.trim();
+  if (!key){ $("settingsBox").open = true; notice("最初に「設定」でSonioxのAPIキーを入力してください。"); return; }
+  if (busy) return;
+  if (segments.length && !confirm("今表示している文字起こしを消して、新しいファイルを文字起こししますか？")) return;
+  busy = true; notice("");
+  segments = []; names = {}; meta = { fileName: file.name, durationMs: 0 };
+  render();
+  let fileId = null, trId = null;
+  try{
+    progress(file.name, "アップロード中… 0%", 2);
+    const up = await uploadWithProgress(file, key, p => progress(null, "アップロード中… " + Math.round(p * 100) + "%", 2 + p * 38));
+    fileId = up.id;
+
+    progress(null, "文字起こしを依頼中…", 42);
+    const terms = $("terms").value.split(/\n/).map(s => s.trim()).filter(Boolean);
+    const body = {
+      model: "stt-async-v5",
+      file_id: fileId,
+      language_hints: ["ja", "en"],
+      enable_speaker_diarization: $("diar").checked
+    };
+    if (terms.length) body.context = { terms };
+    const tr = await api("/transcriptions", key, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    trId = tr.id;
+
+    // 完了まで待つ（長いファイルほど時間がかかる）
+    const t0 = Date.now();
+    for (;;){
+      const st = await api("/transcriptions/" + trId, key);
+      if (st.status === "completed"){ if (st.audio_duration_ms) meta.durationMs = st.audio_duration_ms; break; }
+      if (st.status === "error") throw new Error(st.error_message || "Sonioxで文字起こしに失敗しました");
+      const waited = Math.round((Date.now() - t0) / 1000);
+      progress(null, "文字起こし中…（" + waited + "秒）", Math.min(92, 45 + waited / 3));
+      await sleep(3000);
+    }
+
+    progress(null, "結果を受け取り中…", 95);
+    const res = await api("/transcriptions/" + trId + "/transcript", key);
+    segments = toSegments(res.tokens || []);
+    if (!meta.durationMs && res.tokens && res.tokens.length){
+      const last = res.tokens[res.tokens.length - 1];
+      meta.durationMs = last.end_ms || 0;
+    }
+    store.set("file.segments", segments); store.set("file.names", names); store.set("file.meta", meta);
+    render();
+    progress(null, "完了", 100);
+    if (!segments.length) notice("文字起こしの結果が空でした。音声が入っているか確認してください。");
+  }catch(e){
+    $("progress").hidden = true;
+    if (e.network) notice("Sonioxにつながりませんでした。ネット接続を確認してください。何度やっても同じ場合は、ブラウザからこの方法でSonioxを使えない可能性があるので、その旨を教えてください。");
+    else if (e.status === 401) notice("APIキーが正しくありません。「設定」のAPIキーを確認してください。");
+    else if (e.status === 402) notice("Sonioxの残高が足りません。管理画面で支払い設定を確認してください。");
+    else if (e.status === 413) notice("ファイルが大きすぎます。先に音声だけのMP3に変換してから試してください。");
+    else notice("文字起こしに失敗しました：" + e.message);
+  }finally{
+    // 音声ファイルと文字起こしはSoniox側に残さない
+    if (trId) api("/transcriptions/" + trId, key, { method: "DELETE" }).catch(() => {});
+    if (fileId) api("/files/" + fileId, key, { method: "DELETE" }).catch(() => {});
+    busy = false;
+  }
+}
+
+/* ---------- ファイル選択 ---------- */
+const drop = $("drop"), input = $("file");
+drop.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); input.click(); } });
+["dragenter","dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave","drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => { const f = e.dataTransfer.files[0]; if (f) transcribe(f); });
+input.addEventListener("change", () => { const f = input.files[0]; input.value = ""; if (f) transcribe(f); });
+
+/* ---------- ボタン ---------- */
+async function copyText(text, okMsg){
+  try{ await navigator.clipboard.writeText(text); notice(okMsg); }
+  catch(e){
+    const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select();
+    let ok = false; try{ ok = document.execCommand("copy"); }catch(_){}
+    ta.remove(); notice(ok ? okMsg : "自動でコピーできませんでした。");
+  }
+}
+$("copyBtn").addEventListener("click", () => {
+  const t = plainText(); if (!t){ notice("まだコピーする内容がありません。"); return; }
+  copyText(t, "コピーしました。");
+});
+$("claudeBtn").addEventListener("click", () => {
+  const t = plainText(); if (!t){ notice("まだ整形する内容がありません。"); return; }
+  const d = new Date();
+  const ymd = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0");
+  copyText("以下は録音の文字起こしです（" + ymd + (meta && meta.fileName ? "、" + meta.fileName : "") + "）。文字起こし整形スキルで整形してください。\n\n---\n\n" + t,
+           "整形の指示つきでコピーしました。Claudeに貼り付けて送信してください。");
+});
+$("saveBtn").addEventListener("click", async () => {
+  const t = plainText(); if (!t){ notice("まだ保存する内容がありません。"); return; }
+  const base = (meta && meta.fileName ? meta.fileName.replace(/\.[^.]+$/, "") : "文字起こし");
+  const name = base + "_文字起こし.txt";
+  const blob = new Blob([t], { type: "text/plain;charset=utf-8" });
+  const file = (typeof File === "function") ? new File([blob], name, { type: "text/plain" }) : null;
+  if (file && navigator.canShare && navigator.canShare({ files: [file] })){
+    try{ await navigator.share({ files: [file], title: name }); return; }catch(e){ if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+$("clearBtn").addEventListener("click", () => {
+  if (busy){ notice("文字起こし中は消去できません。"); return; }
+  if (!segments.length) return;
+  if (!confirm("文字起こしを消去しますか？")) return;
+  segments = []; names = {}; meta = null;
+  store.set("file.segments", []); store.set("file.names", {}); store.set("file.meta", null);
+  $("progress").hidden = true; notice(""); render();
+});
+window.addEventListener("beforeunload", e => { if (busy){ e.preventDefault(); e.returnValue = ""; } });
+
+render();
+</script>
+</body>
+</html>
