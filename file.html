@@ -30,7 +30,7 @@ details{background:var(--surface);border:1px solid var(--line);border-radius:10p
 summary{cursor:pointer;padding:10px 14px;font-weight:600;font-size:.9rem}
 .settings{padding:4px 14px 14px;display:flex;flex-direction:column;gap:12px}
 label.f{display:flex;flex-direction:column;gap:4px;font-size:.8rem;color:var(--muted)}
-input[type=password],textarea{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
+select,input[type=password],textarea{font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%}
 textarea{min-height:90px;resize:vertical}
 .check{display:flex;align-items:center;gap:8px;font-size:.9rem}
 .hint{font-size:.75rem;color:var(--muted);margin:0}
@@ -70,10 +70,20 @@ button:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var
   <details id="settingsBox">
     <summary>設定</summary>
     <div class="settings">
-      <label class="f">Soniox APIキー
+      <label class="f">文字起こしに使うAI
+        <select id="engine">
+          <option value="soniox">Soniox（stt-async-v5）— 1回で最長5時間・1時間約15円</option>
+          <option value="gemini">Gemini 3.5 Transcribe — 1回で最長30分（自動で分割）・1時間約45円</option>
+        </select>
+      </label>
+      <label class="f" id="sonioxKeyRow">Soniox APIキー
         <input type="password" id="apiKey" autocomplete="off" placeholder="console.soniox.com で発行したキー">
       </label>
-      <p class="hint">リアルタイム文字起こしのページと共通です。この端末のブラウザの中にだけ保存されます。</p>
+      <label class="f" id="geminiKeyRow">Gemini APIキー
+        <input type="password" id="geminiKey" autocomplete="off" placeholder="Google AI Studio で発行したキー">
+      </label>
+      <p class="hint" id="keyHint">APIキーはこの端末のブラウザの中にだけ保存されます。Sonioxのキーはリアルタイムのページと共通です。</p>
+      <p class="hint" id="geminiHint">Geminiの無料枠で使うと、送った音声はGoogleのサービス改善に使われます。生徒や保護者の声が入る録音は、有料プランのキーかSonioxを使ってください。話者を区別するときは、Geminiの仕様で固有名詞リストは使えません。</p>
       <label class="f">固有名詞・専門用語（1行に1つ）
         <textarea id="terms" placeholder="例：&#10;小川&#10;ビジョナリー学習塾&#10;志望理由書"></textarea>
       </label>
@@ -83,7 +93,7 @@ button:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var
 
   <label class="drop" id="drop" tabindex="0">
     <strong>録音ファイルをここにドラッグ、またはタップして選択</strong>
-    <span>mp3・m4a・wav・mp4・webm など ／ 文字起こしが終わると、ファイルはSonioxから削除します<br>長い動画は、先に<a href="./mp3.html" target="_blank" rel="noopener">MP3変換ツール</a>で音声だけにするとアップロードが速くなります</span>
+    <span>mp3・m4a・wav・mp4・webm など ／ 文字起こしが終わると、送ったファイルはSoniox・Geminiから削除します<br>長い動画は、先に<a href="./mp3.html" target="_blank" rel="noopener">MP3変換ツール</a>で音声だけにするとアップロードが速くなります</span>
     <input type="file" id="file" accept="audio/*,video/*,.m4a,.mp3,.wav,.mp4,.webm,.aac,.flac,.ogg" hidden>
   </label>
 
@@ -111,6 +121,8 @@ button:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var
 "use strict";
 const API = "https://api.soniox.com/v1";
 const USD_PER_HOUR = 0.10;   // stt-async-v5
+const GAPI = "https://generativelanguage.googleapis.com";
+const GEMINI_USD_PER_HOUR = 0.30;   // gemini-3.5-transcribe（約$0.005/分）
 const JPY = 150;
 const STORE = "rtts.v1";     // リアルタイムのページと設定を共有する
 
@@ -132,6 +144,16 @@ $("diar").checked = store.get("diar", true);
 $("apiKey").addEventListener("change", e => store.set("apiKey", e.target.value.trim()));
 $("terms").addEventListener("change", e => store.set("terms", e.target.value));
 $("diar").addEventListener("change", e => store.set("diar", e.target.checked));
+$("geminiKey").value = store.get("geminiKey", "");
+$("geminiKey").addEventListener("change", e => store.set("geminiKey", e.target.value.trim()));
+$("engine").value = store.get("file.engine", "soniox");
+function showEngine(){
+  const g = $("engine").value === "gemini";
+  $("sonioxKeyRow").hidden = g; $("geminiKeyRow").hidden = !g; $("geminiHint").hidden = !g;
+}
+$("engine").addEventListener("change", e => { store.set("file.engine", e.target.value); showEngine(); });
+showEngine();
+if ($("engine").value === "gemini" && !store.get("geminiKey", "")) $("settingsBox").open = true;
 if (!store.get("apiKey", "")) $("settingsBox").open = true;
 
 /* ---------- 表示 ---------- */
@@ -163,7 +185,7 @@ function render(){
   if (meta){
     $("meta").hidden = false;
     $("mLen").textContent = meta.durationMs ? "長さ " + fmt(meta.durationMs) : meta.fileName;
-    const yen = (meta.durationMs || 0) / 3600000 * USD_PER_HOUR * JPY;
+    const yen = (meta.durationMs || 0) / 3600000 * (meta.engine === "gemini" ? GEMINI_USD_PER_HOUR : USD_PER_HOUR) * JPY;
     $("mCost").textContent = meta.durationMs ? "料金の目安 約" + (yen < 10 ? yen.toFixed(1) : Math.round(yen)) + "円" : "";
     $("mChars").textContent = segments.reduce((a, s) => a + s.text.length, 0).toLocaleString() + "文字";
   } else $("meta").hidden = true;
@@ -233,13 +255,19 @@ function uploadWithProgress(file, key, onPct){
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function transcribe(file){
-  const key = $("apiKey").value.trim();
-  if (!key){ $("settingsBox").open = true; notice("最初に「設定」でSonioxのAPIキーを入力してください。"); return; }
+  const engine = $("engine").value;
+  const key = engine === "gemini" ? $("geminiKey").value.trim() : $("apiKey").value.trim();
+  if (!key){ $("settingsBox").open = true; notice("最初に「設定」で" + (engine === "gemini" ? "Gemini" : "Soniox") + "のAPIキーを入力してください。"); return; }
   if (busy) return;
   if (segments.length && !confirm("今表示している文字起こしを消して、新しいファイルを文字起こししますか？")) return;
   busy = true; notice("");
-  segments = []; names = {}; meta = { fileName: file.name, durationMs: 0 };
+  segments = []; names = {}; meta = { fileName: file.name, durationMs: 0, engine };
   render();
+  if (engine === "gemini") return transcribeGemini(file, key);
+  return transcribeSoniox(file, key);
+}
+
+async function transcribeSoniox(file, key){
   let fileId = null, trId = null;
   try{
     progress(file.name, "アップロード中… 0%", 2);
@@ -291,6 +319,181 @@ async function transcribe(file){
     // 音声ファイルと文字起こしはSoniox側に残さない
     if (trId) api("/transcriptions/" + trId, key, { method: "DELETE" }).catch(() => {});
     if (fileId) api("/files/" + fileId, key, { method: "DELETE" }).catch(() => {});
+    busy = false;
+  }
+}
+
+/* ---------- Gemini 3.5 Transcribe ---------- */
+function guessMime(name, type){
+  if (type && /^(audio|video)\//.test(type)) return type.replace(/^video\//, "audio/");
+  const ext = (name.split(".").pop() || "").toLowerCase();
+  return ({ mp3:"audio/mp3", m4a:"audio/m4a", mp4:"audio/m4a", aac:"audio/aac", wav:"audio/wav", flac:"audio/flac", ogg:"audio/ogg", opus:"audio/opus", webm:"audio/webm", aiff:"audio/aiff" })[ext] || "audio/mpeg";
+}
+function mediaDuration(file){
+  return new Promise(resolve => {
+    const el = document.createElement("audio");
+    const url = URL.createObjectURL(file);
+    const done = d => { URL.revokeObjectURL(url); resolve(isFinite(d) && d > 0 ? d : 0); };
+    el.preload = "metadata";
+    el.onloadedmetadata = () => done(el.duration);
+    el.onerror = () => done(0);
+    setTimeout(() => done(el.duration), 15000);
+    el.src = url;
+  });
+}
+async function gFetch(path, key, opts = {}){
+  let res;
+  try{ res = await fetch((path.startsWith("http") ? "" : GAPI) + path, { ...opts, headers: { "x-goog-api-key": key, ...(opts.headers || {}) } }); }
+  catch(e){ const err = new Error("network"); err.network = true; throw err; }
+  if (!res.ok){
+    let msg = ""; try{ const j = await res.json(); msg = (j.error && j.error.message) || JSON.stringify(j); }catch(e){}
+    const err = new Error(msg || ("HTTP " + res.status)); err.status = res.status; throw err;
+  }
+  const t = await res.text(); return t ? JSON.parse(t) : null;
+}
+// Files APIへアップロード（進み具合つき）。戻り値は {name, uri, mimeType, state}
+async function gUpload(blob, displayName, mime, key, onPct){
+  let start;
+  try{
+    start = await fetch(GAPI + "/upload/v1beta/files", {
+      method: "POST",
+      headers: {
+        "x-goog-api-key": key,
+        "X-Goog-Upload-Protocol": "resumable",
+        "X-Goog-Upload-Command": "start",
+        "X-Goog-Upload-Header-Content-Length": String(blob.size),
+        "X-Goog-Upload-Header-Content-Type": mime,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ file: { display_name: displayName } })
+    });
+  }catch(e){ const err = new Error("network"); err.network = true; throw err; }
+  if (!start.ok){
+    let msg = ""; try{ const j = await start.json(); msg = (j.error && j.error.message) || ""; }catch(e){}
+    const err = new Error(msg || ("HTTP " + start.status)); err.status = start.status; throw err;
+  }
+  const url = start.headers.get("x-goog-upload-url");
+  if (!url){ const err = new Error("アップロード先を受け取れませんでした"); err.network = true; throw err; }
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    xhr.setRequestHeader("X-Goog-Upload-Offset", "0");
+    xhr.setRequestHeader("X-Goog-Upload-Command", "upload, finalize");
+    xhr.upload.onprogress = e => { if (e.lengthComputable) onPct(e.loaded / e.total); };
+    xhr.onload = () => {
+      let j = null; try{ j = JSON.parse(xhr.responseText); }catch(e){}
+      if (xhr.status >= 200 && xhr.status < 300 && j && j.file) resolve(j.file);
+      else { const err = new Error((j && j.error && j.error.message) || ("HTTP " + xhr.status)); err.status = xhr.status; reject(err); }
+    };
+    xhr.onerror = () => { const err = new Error("network"); err.network = true; reject(err); };
+    xhr.send(blob);
+  });
+}
+const parseSec = s => { const v = parseFloat(String(s || "0").replace(/s$/, "")); return isNaN(v) ? 0 : v; };
+const needsSpace = (a, b) => /[A-Za-z0-9]$/.test(a) && /^[A-Za-z0-9]/.test(b);
+// 応答 → 話者ごとの段落。part は分割したときの通し番号（話者番号が分割ごとに振り直されるため区別する）
+function geminiSegments(res, offsetMs, diar){
+  const out = [];
+  for (const step of (res.steps || [])){
+    if (step.type && step.type !== "model_output") continue;
+    for (const c of (step.content || [])){
+      if (c.type && c.type !== "text") continue;
+      const words = (c.annotations || []).filter(a => a.type === "word_info");
+      if (!diar || !words.length){
+        if (c.text) out.push({ speaker: "", text: c.text.trim(), startMs: offsetMs + (words.length ? Math.round(parseSec(words[0].start_offset) * 1000) : 0) });
+        continue;
+      }
+      for (const w of words){
+        const sp = w.speaker ? String(w.speaker).replace(/^spk_?/i, "") : "";
+        const t = w.text || "";
+        const last = out[out.length - 1];
+        if (last && last.speaker === sp) last.text += (needsSpace(last.text, t) ? " " : "") + t;
+        else out.push({ speaker: sp, text: t, startMs: offsetMs + Math.round(parseSec(w.start_offset) * 1000) });
+      }
+    }
+  }
+  return out;
+}
+
+async function transcribeGemini(file, key){
+  const diar = $("diar").checked;
+  const limitSec = (diar ? 30 : 60) * 60;      // Geminiの1回あたりの上限
+  const pieceSec = limitSec - 120;              // 余裕をもって少し短く区切る
+  const uploaded = [];
+  try{
+    progress(file.name, "長さを確認中…", 1);
+    const dur = await mediaDuration(file);
+    if (dur) meta.durationMs = Math.round(dur * 1000);
+    const isMp3 = /\.mp3$/i.test(file.name) || file.type === "audio/mpeg";
+
+    // 上限を超えるときはMP3を時間で等分して送る（MP3は途中で切っても再生できる）
+    let pieces = [{ blob: file, offsetSec: 0 }];
+    if (dur > limitSec - 30){
+      if (!isMp3) throw new Error("Geminiは1回に" + (diar ? "30分" : "1時間") + "までしか受け付けません。長いファイルは、先にMP3変換ツールでMP3にしてから選んでください（自動で分けて送ります）。");
+      const n = Math.ceil(dur / pieceSec);
+      const bytes = Math.ceil(file.size / n);
+      pieces = [];
+      for (let i = 0; i < n; i++) pieces.push({ blob: file.slice(i * bytes, Math.min(file.size, (i + 1) * bytes), "audio/mpeg"), offsetSec: dur * i / n });
+    }
+    const n = pieces.length;
+    const mime = isMp3 ? "audio/mp3" : guessMime(file.name, file.type);
+    const terms = $("terms").value.split(/\n/).map(s => s.trim()).filter(Boolean).slice(0, 100);
+    const tc = { language_codes: ["ja-JP"], mode: diar ? { type: "verbatim", diarization_mode: "speaker" } : { type: "verbatim" } };
+    if (!diar && terms.length) tc.custom_vocabulary = terms;   // 話者分離とは同時に使えない仕様
+
+    const all = [];
+    for (let i = 0; i < n; i++){
+      const label = n > 1 ? "（" + (i + 1) + "/" + n + "）" : "";
+      const base = i / n * 100, span = 100 / n;
+      const up = await gUpload(pieces[i].blob, file.name + label, mime, key,
+        p => progress(null, "アップロード中" + label + "… " + Math.round(p * 100) + "%", base + span * 0.4 * p));
+      uploaded.push(up.name);
+      // 使える状態になるまで待つ
+      let f = up;
+      for (let k = 0; f.state && f.state !== "ACTIVE"; k++){
+        if (f.state === "FAILED") throw new Error("Gemini側でファイルの処理に失敗しました");
+        if (k > 100) throw new Error("ファイルの準備に時間がかかりすぎています");
+        progress(null, "ファイルを準備中" + label + "…", base + span * 0.45);
+        await sleep(2000);
+        f = await gFetch("/v1beta/" + up.name, key);
+      }
+      progress(null, "文字起こし中" + label + "…（数分かかることがあります）", base + span * 0.5);
+      let res = await gFetch("/v1beta/interactions", key, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "gemini-3.5-transcribe", input: [{ type: "audio", uri: f.uri || up.uri, mime_type: mime }], generation_config: { transcription_config: tc } })
+      });
+      // 時間がかかる場合は完了まで待つ
+      const t0 = Date.now();
+      while (res && res.status && !/^(completed|succeeded)$/i.test(res.status)){
+        if (/fail|error|cancel/i.test(res.status)) throw new Error((res.error && res.error.message) || "Geminiで文字起こしに失敗しました");
+        const waited = Math.round((Date.now() - t0) / 1000);
+        progress(null, "文字起こし中" + label + "…（" + waited + "秒）", base + span * Math.min(0.95, 0.5 + waited / 600));
+        await sleep(4000);
+        const id = String(res.id || "");
+        res = await gFetch("/v1beta/" + (id.startsWith("interactions/") ? id : "interactions/" + id), key);
+      }
+      const segs = geminiSegments(res, Math.round(pieces[i].offsetSec * 1000), diar);
+      // 分割したときは、話者番号が区切りごとに振り直されるので区別がつくようにする
+      if (n > 1 && diar) segs.forEach(s => { if (s.speaker) s.speaker = (i + 1) + "-" + s.speaker; });
+      all.push(...segs);
+      segments = all.slice(); render();
+      gFetch("/v1beta/" + up.name, key, { method: "DELETE" }).catch(() => {});
+    }
+    segments = all;
+    store.set("file.segments", segments); store.set("file.names", names); store.set("file.meta", meta);
+    render();
+    progress(null, "完了", 100);
+    if (!segments.length) notice("文字起こしの結果が空でした。音声が入っているか確認してください。");
+    else if (n > 1 && diar) notice(n + "つに分けて文字起こししました。話者の番号は区切りごとに振り直されるため「1-1」「2-1」のように表示しています（同じ人でも番号が違うことがあります）。区切り目で1〜2語欠けることがあります。");
+  }catch(e){
+    $("progress").hidden = true;
+    if (e.network) notice("Geminiにつながりませんでした。ネット接続を確認してください。");
+    else if (e.status === 400 && /api key/i.test(e.message)) notice("Gemini APIキーが正しくありません。「設定」のキーを確認してください。");
+    else if (e.status === 403) notice("このGemini APIキーでは使えませんでした（" + e.message + "）。");
+    else if (e.status === 429) notice("Geminiの利用上限に達しました。無料枠の場合は、時間をおいてから試すか、Sonioxに切り替えてください。");
+    else notice("文字起こしに失敗しました：" + e.message);
+  }finally{
+    uploaded.forEach(name => gFetch("/v1beta/" + name, key, { method: "DELETE" }).catch(() => {}));
     busy = false;
   }
 }
