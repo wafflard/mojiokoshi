@@ -151,6 +151,7 @@
       <button data-f="last">前回×</button>
       <button data-f="ever">×が1回以上</button>
       <button data-f="unpass">未合格</button>
+      <button data-f="due">今日の復習<span id="dueN"></span></button>
     </div>
     <p class="stat" id="stat"></p>
     <div style="text-align:right"><button class="link" id="resetBtn">記録をリセット</button></div>
@@ -311,6 +312,8 @@
     if(!r.ck){ r.ck = true; r.sb = now; return "check"; }
     return "";
   }
+  // 今日の復習：一度解いていて、段階を上げられる日（または合格確認の日）が来ている問題
+  function isReview(r){ return !!r && r.t > 0 && !((r.st||0) >= 4 && r.ck) && dayNo(Date.now()) >= dueDay(r); }
   function fmtDay(dn){ var d = new Date(dn * 864e5); d = new Date(d.getTime() + d.getTimezoneOffset()*6e4 + 12*36e5); return (d.getMonth()+1) + "/" + d.getDate(); }
   function pass(x){
     var r = rec(x);
@@ -318,6 +321,7 @@
     if(filter==="last") return r && r.l===0;
     if(filter==="ever") return r && r.w>0;
     if(filter==="unpass") return !r || (r.st||0) < 4;
+    if(filter==="due") return isReview(r);
     return true;
   }
   var num = saved.num || 20;
@@ -443,6 +447,8 @@
     var xs = items.filter(function(x){ return us.indexOf(x.u)>=0 && ss.indexOf(x.s)>=0; });
     var nw=0, o=0, w=0, ps=0;
     xs.forEach(function(x){ var r=rec(x); if(!r) nw++; else { if(r.l===1) o++; else w++; if((r.st||0)>=4) ps++; } });
+    var dn = xs.filter(function(x){ return isReview(rec(x)); }).length;
+    $("dueN").textContent = dn ? "（" + dn + "）" : "";
     $("stat").textContent = "選択中 " + xs.length + "問：合格 " + ps + "／前回○ " + o + "／前回× " + w + "／まだ " + nw;
   }
   function paintFilters(){
