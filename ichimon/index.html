@@ -46,7 +46,7 @@
   .bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
   .qcard{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 16px;min-height:220px}
   .tag{font-size:.75rem;color:var(--sub)}
-  .q{font-size:1.12rem;margin:10px 0 16px;font-weight:600}
+  .q{font-size:1.12rem;margin:10px 0 16px;font-weight:600;line-height:2.1}
   .a{display:none;background:var(--accent-soft);border-radius:10px;padding:12px;font-size:1.2rem;font-weight:bold;color:var(--accent)}
   .a.show{display:block}
   .a, ul.miss b{line-height:2.1}
@@ -58,7 +58,7 @@
   .link{background:none;border:none;color:var(--sub);text-decoration:underline;font-size:.85rem;cursor:pointer;padding:4px}
   .score{font-size:2.2rem;font-weight:bold;text-align:center;margin:6px 0}
   ul.miss{list-style:none;padding:0;margin:0}
-  ul.miss li{padding:10px 0;border-top:1px solid var(--line);font-size:.9rem}
+  ul.miss li{line-height:2;padding:10px 0;border-top:1px solid var(--line);font-size:.9rem}
   ul.miss li b{color:var(--accent);display:block}
   .hidden{display:none}
   footer{color:var(--sub);font-size:.72rem;margin-top:20px;text-align:center}
@@ -252,7 +252,7 @@
     $("prog").textContent = (idx+1) + " / " + deck.length;
     $("barfill").style.width = (idx/deck.length*100) + "%";
     $("qtag").innerHTML = it.u + " " + unitName(it.u) + "　<span class='star'>" + (it.s?STARLAB[it.s]:"") + "</span>";
-    $("qtext").textContent = it.q;
+    $("qtext").innerHTML = withYomi(it.q);
     $("atext").innerHTML = withYomi(it.a);
     $("atext").classList.remove("show");
     $("revealWrap").classList.remove("hidden");
@@ -283,7 +283,7 @@
     $("missBox").classList.toggle("hidden", misses.length===0);
     $("retryMiss").classList.toggle("hidden", misses.length===0);
     $("missList").innerHTML = misses.map(function(m){
-      return "<li>" + esc(m.q) + "<b>" + esc(m.a) + "</b></li>";
+      return "<li>" + withYomi(m.q) + "<b>" + esc(m.a) + "</b></li>";
     }).join("");
     show("result");
   }
