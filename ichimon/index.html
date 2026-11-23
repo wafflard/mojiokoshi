@@ -81,6 +81,15 @@
   </section>
 
   <section class="box">
+    <h2>出題順</h2>
+    <div class="row seg" id="modes">
+      <button data-m="random">ランダム</button>
+      <button data-m="order">順番（本の順）</button>
+    </div>
+    <label class="opt" id="fromWrap">対象の <input type="number" id="from" min="1" value="1" style="width:64px;height:auto;padding:4px 6px;font-size:.9rem"> 問目から</label>
+  </section>
+
+  <section class="box" id="numBox">
     <h2>出題数</h2>
     <div class="row seg" id="nums"></div>
     <label class="opt"><input type="checkbox" id="onlyMiss"> 前に×をつけた問題だけ</label>
@@ -140,6 +149,7 @@
   var saved = store.get("ichimon-settings", {});
   var missSet = store.get("ichimon-miss", {}); // key: q text -> true
   var num = saved.num || 20;
+  var mode = saved.mode || "random";
   var $ = function(id){ return document.getElementById(id); };
 
   // --- 単元チェック ---
@@ -174,6 +184,17 @@
     update();
   });
 
+  // --- 出題順 ---
+  function paintModes(){
+    [].forEach.call($("modes").children, function(c){ c.classList.toggle("on", c.dataset.m===mode); });
+    $("fromWrap").classList.toggle("hidden", mode!=="order");
+  }
+  paintModes();
+  $("modes").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if(!b) return;
+    mode = b.dataset.m; paintModes(); update();
+  });
+
   document.querySelectorAll("[data-all],[data-none]").forEach(function(b){
     b.addEventListener("click", function(){
       var name = b.dataset.all || b.dataset.none, val = !!b.dataset.all;
@@ -192,12 +213,19 @@
       return us.indexOf(x.u)>=0 && ss.indexOf(x.s)>=0 && (!only || missSet[x.q]);
     });
   }
+  function fromIdx(len){
+    var v = parseInt($("from").value, 10);
+    if(!(v >= 1)) v = 1;
+    return Math.min(v - 1, Math.max(len - 1, 0));
+  }
+  $("from").addEventListener("input", function(){ update(); });
   function update(){
     var p = pool();
-    var k = num==="全部" ? p.length : Math.min(num, p.length);
-    $("count").textContent = "対象 " + p.length + " 問 → " + k + " 問を出題";
+    var rest = mode==="order" ? Math.max(0, p.length - (fromIdx(p.length))) : p.length;
+    var k = num==="全部" ? rest : Math.min(num, rest);
+    $("count").textContent = "対象 " + p.length + " 問 → " + k + " 問を" + (mode==="order" ? "本の順に" : "ランダムに") + "出題";
     $("start").disabled = p.length === 0;
-    store.set("ichimon-settings", {units:checked("unit"), stars:checked("star"), num:num});
+    store.set("ichimon-settings", {units:checked("unit"), stars:checked("star"), num:num, mode:mode});
   }
   update();
 
@@ -212,7 +240,7 @@
   }
   $("start").addEventListener("click", function(){
     lastPool = pool();
-    var d = shuffle(lastPool.slice());
+    var d = mode === "order" ? lastPool.slice(fromIdx(lastPool.length)) : shuffle(lastPool.slice());
     if(num !== "全部") d = d.slice(0, num);
     startWith(d);
   });
@@ -258,7 +286,7 @@
     show("result");
   }
   function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
-  $("retryMiss").addEventListener("click", function(){ startWith(shuffle(misses.slice())); });
+  $("retryMiss").addEventListener("click", function(){ startWith(mode==="order" ? misses.slice() : shuffle(misses.slice())); });
   $("again").addEventListener("click", function(){ $("start").click(); });
   $("back").addEventListener("click", function(){ show("setup"); update(); });
 
