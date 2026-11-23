@@ -77,7 +77,12 @@
   .hist .h.o b{color:var(--ok)} .hist .h.x b{color:var(--ng)}
   .inp{flex:1;min-width:0;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:16px}
   #acctMsg.err,#syncMsg.err{color:var(--ng)}
-  #filters button{font-size:.8rem;padding:9px 2px}
+  #filters{flex-wrap:wrap}
+  #filters button{font-size:.8rem;padding:9px 2px;flex:1 1 30%}
+  .stg{font-size:.75rem;margin-left:6px;padding:1px 6px;border-radius:10px;background:var(--line);color:var(--sub)}
+  .stg.pass{background:var(--ok-soft);color:var(--ok);font-weight:bold}
+  .stgNote{font-size:.72rem;color:var(--sub);margin-top:4px}
+  .up{color:var(--ok);font-weight:bold}
   .stat{font-size:.82rem;color:var(--sub);margin:10px 0 0}
   .confirm{margin-top:8px;padding:10px;border-radius:8px;background:var(--accent-soft);font-size:.85rem}
   .rec{font-size:.75rem;color:var(--sub);margin-left:6px}
@@ -145,6 +150,7 @@
       <button data-f="new">まだ解いてない</button>
       <button data-f="last">前回×</button>
       <button data-f="ever">×が1回以上</button>
+      <button data-f="unpass">未合格</button>
     </div>
     <p class="stat" id="stat"></p>
     <div style="text-align:right"><button class="link" id="resetBtn">記録をリセット</button></div>
@@ -165,6 +171,7 @@
   <div class="qcard">
     <div class="tag" id="qtag"></div>
     <div class="hist" id="qhist"></div>
+    <div class="stgNote hidden" id="qnote"></div>
     <div class="q" id="qtext"></div>
     <div class="a" id="atext"></div>
   </div>
@@ -180,6 +187,7 @@
   <section class="box">
     <div class="tag" style="text-align:center">結果</div>
     <div class="score" id="score"></div>
+    <p class="stat" id="stageSum" style="text-align:center;margin:0 0 12px"></p>
     <div class="row" style="flex-direction:column;gap:8px">
       <button class="big" id="retryMiss">×の問題だけもう一度</button>
       <button class="ghost" id="again">同じ条件で新しく出題</button>
@@ -278,11 +286,38 @@
     }).catch(function(e){ m.textContent = e.status ? e.message : "通信できませんでした"; m.classList.add("err"); });
   }
   function rec(x){ return log[keyOf(x)]; }
+  // ===== 段階（合格）判定 =====
+  // st: 0〜3=段階, 4=合格 / sb: 最後に段階が変わった（または最初に解いた）日時 / ck: 合格後の確認済み
+  // 段階を上げるには、sb から下記の日数以上たってからの○が必要。×は1段階下げる。
+  var GAP = [1, 3, 7, 14, 30]; // st0→1, 1→2, 2→3, 3→合格, 合格→確認
+  function dayNo(t){ var d = new Date(t); return Math.round(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 864e5); }
+  function needDays(r){ return GAP[Math.min(r.st||0, 4)]; }
+  function dueDay(r){ return dayNo(r.sb || r.t) + needDays(r); }
+  function isDue(r){ return dayNo(Date.now()) >= dueDay(r); }
+  function applyStage(r, ok, now){
+    // 返り値: "up" / "down" / "pass" / "check" / ""
+    if(r.sb == null){
+      r.st = 0;
+      if(!r.t){ r.sb = now; return ""; } // 初回はスタート地点を決めるだけ
+      r.sb = r.t; // 以前の記録がある問題は、前回解いた日をスタート地点にする
+    }
+    var st = r.st || 0;
+    if(!ok){
+      if(st > 0){ r.st = st - 1; r.ck = false; r.sb = now; return "down"; }
+      r.sb = now; return "";
+    }
+    if(dayNo(now) < dayNo(r.sb) + GAP[Math.min(st,4)]) return "";
+    if(st < 4){ r.st = st + 1; r.sb = now; return r.st === 4 ? "pass" : "up"; }
+    if(!r.ck){ r.ck = true; r.sb = now; return "check"; }
+    return "";
+  }
+  function fmtDay(dn){ var d = new Date(dn * 864e5); d = new Date(d.getTime() + d.getTimezoneOffset()*6e4 + 12*36e5); return (d.getMonth()+1) + "/" + d.getDate(); }
   function pass(x){
     var r = rec(x);
     if(filter==="new") return !r;
     if(filter==="last") return r && r.l===0;
     if(filter==="ever") return r && r.w>0;
+    if(filter==="unpass") return !r || (r.st||0) < 4;
     return true;
   }
   var num = saved.num || 20;
@@ -399,16 +434,16 @@
   function paintStats(){
     // 単元ごと：解いた数と、前回○の割合
     U.forEach(function(u){
-      var xs = items.filter(function(x){return x.u===u.id;}), done=0, good=0;
-      xs.forEach(function(x){ var r=rec(x); if(r){ done++; if(r.l===1) good++; } });
-      var el = $("us"+u.id); if(el) el.textContent = done ? (done+"問済・○"+Math.round(good/done*100)+"%") : "";
+      var xs = items.filter(function(x){return x.u===u.id;}), done=0, good=0, ps=0;
+      xs.forEach(function(x){ var r=rec(x); if(r){ done++; if(r.l===1) good++; if((r.st||0)>=4) ps++; } });
+      var el = $("us"+u.id); if(el) el.textContent = done ? ("合格"+ps+"・"+done+"問済・○"+Math.round(good/done*100)+"%") : "";
     });
     // 選択中の単元・★の内訳
     var us = checked("unit"), ss = checked("star");
     var xs = items.filter(function(x){ return us.indexOf(x.u)>=0 && ss.indexOf(x.s)>=0; });
-    var nw=0, o=0, w=0;
-    xs.forEach(function(x){ var r=rec(x); if(!r) nw++; else if(r.l===1) o++; else w++; });
-    $("stat").textContent = "選択中 " + xs.length + "問：前回○ " + o + "／前回× " + w + "／まだ " + nw;
+    var nw=0, o=0, w=0, ps=0;
+    xs.forEach(function(x){ var r=rec(x); if(!r) nw++; else { if(r.l===1) o++; else w++; if((r.st||0)>=4) ps++; } });
+    $("stat").textContent = "選択中 " + xs.length + "問：合格 " + ps + "／前回○ " + o + "／前回× " + w + "／まだ " + nw;
   }
   function paintFilters(){
     [].forEach.call($("filters").children, function(c){ c.classList.toggle("on", c.dataset.f===filter); });
@@ -445,12 +480,12 @@
   update();
 
   // --- 出題 ---
-  var deck = [], idx = 0, misses = [], lastPool = [];
+  var deck = [], idx = 0, misses = [], lastPool = [], ups = 0, passes = 0, downs = 0, checks = 0;
   function shuffle(a){ for(var i=a.length-1;i>0;i--){ var j=Math.floor(Math.random()*(i+1)); var t=a[i];a[i]=a[j];a[j]=t; } return a; }
   function show(id){ ["setup","quiz","result"].forEach(function(s){ $(s).classList.toggle("hidden", s!==id); }); window.scrollTo(0,0); }
 
   function startWith(list){
-    deck = list; idx = 0; misses = [];
+    deck = list; idx = 0; misses = []; ups = 0; passes = 0; downs = 0; checks = 0;
     show("quiz"); render();
   }
   $("start").addEventListener("click", function(){
@@ -467,6 +502,7 @@
     $("barfill").style.width = (idx/deck.length*100) + "%";
     $("qtag").innerHTML = unitNo(it.u) + " " + unitName(it.u) + "　<span class='star'>" + (it.s?STARLAB[it.s]:"") + "</span>" + recHtml(it);
     $("qhist").innerHTML = histHtml(it);
+    var nt = noteHtml(it); $("qnote").textContent = nt; $("qnote").classList.toggle("hidden", !nt);
     $("qtext").innerHTML = withYomi(it.q);
     $("atext").innerHTML = withYomi(it.a);
     $("atext").classList.remove("show");
@@ -476,8 +512,21 @@
   function recHtml(x){
     var r = rec(x);
     if(!r) return "<span class='rec'>初めて</span>";
-    return "<span class='rec'>前回" + (r.l===1?"<span class='o'>○</span>":"<span class='x'>×</span>") +
+    return stageHtml(r) + "<span class='rec'>前回" + (r.l===1?"<span class='o'>○</span>":"<span class='x'>×</span>") +
       "（<span class='o'>○" + r.c + "</span> <span class='x'>×" + r.w + "</span>）</span>";
+  }
+  function stageHtml(r){
+    if(r.sb == null) return "";
+    var st = r.st || 0;
+    return st >= 4 ? "<span class='stg pass'>合格" + (r.ck ? "✓" : "") + "</span>" : "<span class='stg'>段階" + st + "/4</span>";
+  }
+  function noteHtml(x){
+    var r = rec(x); if(!r || r.sb == null) return "";
+    var st = r.st || 0;
+    if(st >= 4 && r.ck) return "合格・確認済み";
+    var due = dueDay(r), today = dayNo(Date.now());
+    var what = st >= 4 ? "確認" : (st === 3 ? "合格" : "段階" + (st+1) + "に");
+    return due <= today ? "今日○なら" + what + (st >= 4 ? "完了" : "") : fmtDay(due) + "以降の○で" + what + (st >= 4 ? "" : "");
   }
   function histHtml(x){
     var r = rec(x), h = (r && r.h) || [];
@@ -499,6 +548,8 @@
     var it = deck[idx];
     var k = keyOf(it), r = log[k] || {c:0,w:0,l:0,t:0};
     if(ok){ r.c++; r.l = 1; } else { r.w++; r.l = 0; misses.push(it); }
+    var ev = applyStage(r, ok, Date.now());
+    if(ev === "up") ups++; if(ev === "pass") passes++; if(ev === "down") downs++; if(ev === "check") checks++;
     r.t = Date.now();
     r.h = (r.h || []).concat([[ok?1:0, r.t]]).slice(-5); // 直近5回 [結果, 日時]
     log[k] = r;
@@ -514,6 +565,12 @@
   function finish(){
     var ok = deck.length - misses.length;
     $("score").textContent = ok + " / " + deck.length;
+    var sm = [];
+    if(passes) sm.push("<span class='up'>合格 +" + passes + "</span>");
+    if(ups) sm.push("<span class='up'>段階アップ " + ups + "</span>");
+    if(checks) sm.push("<span class='up'>合格確認 " + checks + "</span>");
+    if(downs) sm.push("<span class='x'>段階ダウン " + downs + "</span>");
+    $("stageSum").innerHTML = sm.join("　") || "段階の変化なし（間隔をあけて解くと段階が上がります）";
     $("missBox").classList.toggle("hidden", misses.length===0);
     $("retryMiss").classList.toggle("hidden", misses.length===0);
     $("missList").innerHTML = misses.map(function(m){

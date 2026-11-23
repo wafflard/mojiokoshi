@@ -40,6 +40,9 @@ function mergeLog(base, inc) {
     const a = out[k], b = inc[k];
     if (!b || typeof b !== "object") continue;
     const nb = { c: +b.c || 0, w: +b.w || 0, l: b.l === 1 ? 1 : 0, t: +b.t || 0 };
+    if (b.st != null) nb.st = Math.max(0, Math.min(4, +b.st || 0));
+    if (b.sb != null) nb.sb = +b.sb || 0;
+    if (b.ck) nb.ck = true;
     if (Array.isArray(b.h)) nb.h = b.h.slice(-5).map((e) => [e && e[0] === 1 ? 1 : 0, +(e && e[1]) || 0]);
     if (!a) { out[k] = nb; continue; }
     const na = a.c + a.w, nn = nb.c + nb.w;
