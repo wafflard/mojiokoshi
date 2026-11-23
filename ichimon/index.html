@@ -27,7 +27,16 @@
   label.chk:first-of-type{border-top:none}
   label.chk input{width:20px;height:20px;accent-color:var(--accent);flex:none}
   label.chk .n{margin-left:auto;color:var(--sub);font-size:.8rem}
-  .era{font-size:.75rem;color:var(--sub);margin:6px 0 0}
+  .eraBox{border-top:1px solid var(--line)}
+  .eraBox:first-child{border-top:none}
+  .eraHead{display:flex;align-items:center;gap:10px;padding:8px 4px}
+  .eraHead .eraChk{width:20px;height:20px;accent-color:var(--accent);flex:none}
+  .eraTog{flex:1;display:flex;align-items:center;gap:8px;background:none;border:none;color:var(--ink);font-size:.95rem;font-weight:bold;padding:4px 0;cursor:pointer;text-align:left}
+  .eraCnt{margin-left:auto;font-size:.78rem;font-weight:normal;color:var(--sub)}
+  .chev{color:var(--sub);transition:transform .15s;transform:rotate(-90deg)}
+  .eraBox.open .chev{transform:none}
+  .eraBody{display:none;padding-left:14px}
+  .eraBox.open .eraBody{display:block}
   .stars{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
   .stars label.chk{border-top:none}
   .star{color:var(--accent);letter-spacing:1px}
@@ -280,16 +289,47 @@
   var mode = saved.mode || "random";
   var $ = function(id){ return document.getElementById(id); };
 
-  // --- 単元チェック ---
-  var uHtml = "", lastEra = "";
-  U.forEach(function(u){
-    if(u.era !== lastEra){ uHtml += '<div class="era">'+u.era+'</div>'; lastEra = u.era; }
-    var n = items.filter(function(x){return x.u===u.id;}).length;
-    var on = !saved.units || saved.units.indexOf(u.id) >= 0;
-    uHtml += '<label class="chk"><input type="checkbox" name="unit" value="'+u.id+'"'+(on?' checked':'')+'>'+
-      '<span>'+u.id+'　'+u.name+'</span><span class="n">'+n+'問<small id="us'+u.id+'"></small></span></label>';
+  // --- 単元チェック（時代ごとに開閉） ---
+  var eras = [];
+  U.forEach(function(u){ if(eras.indexOf(u.era) < 0) eras.push(u.era); });
+  var openEras = store.get("ichimon-open", null) || eras.slice();
+  var uHtml = "";
+  eras.forEach(function(era, ei){
+    var open = openEras.indexOf(era) >= 0;
+    uHtml += '<div class="eraBox' + (open ? ' open' : '') + '" data-era="' + ei + '">' +
+      '<div class="eraHead"><input type="checkbox" class="eraChk" data-era="' + ei + '">' +
+      '<button type="button" class="eraTog" data-era="' + ei + '"><span class="eraName">' + era + '</span>' +
+      '<span class="eraCnt" id="ec' + ei + '"></span><span class="chev">▾</span></button></div><div class="eraBody">';
+    U.filter(function(u){ return u.era === era; }).forEach(function(u){
+      var n = items.filter(function(x){return x.u===u.id;}).length;
+      var on = !saved.units || saved.units.indexOf(u.id) >= 0;
+      uHtml += '<label class="chk"><input type="checkbox" name="unit" data-era="' + ei + '" value="'+u.id+'"'+(on?' checked':'')+'>'+
+        '<span>'+u.id+'　'+u.name+'</span><span class="n">'+n+'問<small id="us'+u.id+'"></small></span></label>';
+    });
+    uHtml += '</div></div>';
   });
   $("units").innerHTML = uHtml;
+  function paintEras(){
+    eras.forEach(function(era, ei){
+      var cs = document.querySelectorAll('input[name="unit"][data-era="'+ei+'"]');
+      var on = [].filter.call(cs, function(c){ return c.checked; }).length;
+      var ec = document.querySelector('.eraChk[data-era="'+ei+'"]');
+      ec.checked = on === cs.length && on > 0; ec.indeterminate = on > 0 && on < cs.length;
+      $("ec"+ei).textContent = on + "/" + cs.length + "単元";
+    });
+  }
+  $("units").addEventListener("click", function(e){
+    var t = e.target.closest(".eraTog"); if(!t) return;
+    var box = t.closest(".eraBox"); box.classList.toggle("open");
+    openEras = [].filter.call(document.querySelectorAll(".eraBox"), function(b){ return b.classList.contains("open"); })
+      .map(function(b){ return eras[+b.dataset.era]; });
+    store.set("ichimon-open", openEras);
+  });
+  $("units").addEventListener("change", function(e){
+    if(!e.target.classList.contains("eraChk")) return;
+    var v = e.target.checked;
+    document.querySelectorAll('input[name="unit"][data-era="'+e.target.dataset.era+'"]').forEach(function(c){ c.checked = v; });
+  });
 
   // --- 星チェック ---
   var sHtml = "";
@@ -354,7 +394,7 @@
     $("count").textContent = "対象 " + p.length + " 問 → " + k + " 問を" + (mode==="order" ? "本の順に" : "ランダムに") + "出題";
     $("start").disabled = p.length === 0;
     store.set("ichimon-settings", {units:checked("unit"), stars:checked("star"), num:num, mode:mode, filter:filter});
-    paintStats();
+    paintStats(); paintEras();
   }
   function paintStats(){
     // 単元ごと：解いた数と、前回○の割合
