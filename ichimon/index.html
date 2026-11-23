@@ -61,6 +61,11 @@
   ul.miss li{line-height:2;padding:10px 0;border-top:1px solid var(--line);font-size:.9rem}
   ul.miss li b{color:var(--accent);display:block}
   .hidden{display:none}
+  .hist{display:flex;align-items:flex-end;gap:6px;margin-top:6px;font-size:.7rem;color:var(--sub)}
+  .hist .lab{margin-right:2px}
+  .hist .h{display:flex;flex-direction:column;align-items:center;min-width:30px}
+  .hist .h b{font-size:1rem;line-height:1.2}
+  .hist .h.o b{color:var(--ok)} .hist .h.x b{color:var(--ng)}
   .inp{flex:1;min-width:0;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:16px}
   #acctMsg.err,#syncMsg.err{color:var(--ng)}
   #filters button{font-size:.8rem;padding:9px 2px}
@@ -150,6 +155,7 @@
   <div class="bar"><i id="barfill"></i></div>
   <div class="qcard">
     <div class="tag" id="qtag"></div>
+    <div class="hist" id="qhist"></div>
     <div class="q" id="qtext"></div>
     <div class="a" id="atext"></div>
   </div>
@@ -419,6 +425,7 @@
     $("prog").textContent = (idx+1) + " / " + deck.length;
     $("barfill").style.width = (idx/deck.length*100) + "%";
     $("qtag").innerHTML = it.u + " " + unitName(it.u) + "　<span class='star'>" + (it.s?STARLAB[it.s]:"") + "</span>" + recHtml(it);
+    $("qhist").innerHTML = histHtml(it);
     $("qtext").innerHTML = withYomi(it.q);
     $("atext").innerHTML = withYomi(it.a);
     $("atext").classList.remove("show");
@@ -430,6 +437,14 @@
     if(!r) return "<span class='rec'>初めて</span>";
     return "<span class='rec'>前回" + (r.l===1?"<span class='o'>○</span>":"<span class='x'>×</span>") +
       "（<span class='o'>○" + r.c + "</span> <span class='x'>×" + r.w + "</span>）</span>";
+  }
+  function histHtml(x){
+    var r = rec(x), h = (r && r.h) || [];
+    if(!h.length) return "";
+    return "<span class='lab'>直近" + h.length + "回<br>（古→新）</span>" + h.map(function(e){
+      var d = new Date(e[1]);
+      return "<span class='h " + (e[0]?"o":"x") + "'><b>" + (e[0]?"○":"×") + "</b>" + (d.getMonth()+1) + "/" + d.getDate() + "</span>";
+    }).join("");
   }
   function reveal(){
     $("atext").classList.add("show");
@@ -443,7 +458,9 @@
     var it = deck[idx];
     var k = keyOf(it), r = log[k] || {c:0,w:0,l:0,t:0};
     if(ok){ r.c++; r.l = 1; } else { r.w++; r.l = 0; misses.push(it); }
-    r.t = Date.now(); log[k] = r;
+    r.t = Date.now();
+    r.h = (r.h || []).concat([[ok?1:0, r.t]]).slice(-5); // 直近5回 [結果, 日時]
+    log[k] = r;
     store.set("ichimon-log", log);
     if(auth) queueSync();
     idx++;
