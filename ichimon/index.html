@@ -61,6 +61,13 @@
   ul.miss li{line-height:2;padding:10px 0;border-top:1px solid var(--line);font-size:.9rem}
   ul.miss li b{color:var(--accent);display:block}
   .hidden{display:none}
+  #filters button{font-size:.8rem;padding:9px 2px}
+  .stat{font-size:.82rem;color:var(--sub);margin:10px 0 0}
+  .confirm{margin-top:8px;padding:10px;border-radius:8px;background:var(--accent-soft);font-size:.85rem}
+  .rec{font-size:.75rem;color:var(--sub);margin-left:6px}
+  .rec .o{color:var(--ok)} .rec .x{color:var(--ng)}
+  label.chk .n{text-align:right;white-space:nowrap;flex:none}
+  label.chk .n small{display:block;font-size:.72rem}
   footer{color:var(--sub);font-size:.72rem;margin-top:20px;text-align:center}
 </style>
 </head>
@@ -94,7 +101,22 @@
   <section class="box" id="numBox">
     <h2>出題数</h2>
     <div class="row seg" id="nums"></div>
-    <label class="opt"><input type="checkbox" id="onlyMiss"> 前に×をつけた問題だけ</label>
+  </section>
+
+  <section class="box">
+    <h2>出題する問題（記録で絞り込み）</h2>
+    <div class="row seg" id="filters">
+      <button data-f="all">すべて</button>
+      <button data-f="new">まだ解いてない</button>
+      <button data-f="last">前回×</button>
+      <button data-f="ever">×が1回以上</button>
+    </div>
+    <p class="stat" id="stat"></p>
+    <div style="text-align:right"><button class="link" id="resetBtn">記録をリセット</button></div>
+    <div class="confirm hidden" id="resetConfirm">
+      今の端末に保存された正答・誤答の記録をすべて消します。
+      <div class="row" style="margin-top:8px"><button class="ghost" id="resetNo" style="flex:1">やめる</button><button class="big" id="resetYes" style="flex:1;padding:11px">消す</button></div>
+    </div>
   </section>
 
   <p class="count" id="count"></p>
@@ -149,7 +171,27 @@
     set:function(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
   };
   var saved = store.get("ichimon-settings", {});
-  var missSet = store.get("ichimon-miss", {}); // key: q text -> true
+  // 記録: key -> {c:正解回数, w:誤答回数, l:前回(1=○,0=×), t:最終日時}
+  function plain(t){ return String(t).replace(/｛([^｜｝]*)｜[^｝]*｝/g, "$1"); }
+  function keyOf(x){ return x.u + ":" + plain(x.q); }
+  var log = store.get("ichimon-log", null);
+  if(!log){ // 旧「×だけ」記録からの引き継ぎ
+    log = {};
+    var old = store.get("ichimon-miss", {});
+    Object.keys(old).forEach(function(q){
+      items.forEach(function(x){ if(plain(x.q)===plain(q)) log[keyOf(x)] = {c:0,w:1,l:0,t:0}; });
+    });
+    store.set("ichimon-log", log);
+  }
+  var filter = saved.filter || "all";
+  function rec(x){ return log[keyOf(x)]; }
+  function pass(x){
+    var r = rec(x);
+    if(filter==="new") return !r;
+    if(filter==="last") return r && r.l===0;
+    if(filter==="ever") return r && r.w>0;
+    return true;
+  }
   var num = saved.num || 20;
   var mode = saved.mode || "random";
   var $ = function(id){ return document.getElementById(id); };
@@ -161,7 +203,7 @@
     var n = items.filter(function(x){return x.u===u.id;}).length;
     var on = !saved.units || saved.units.indexOf(u.id) >= 0;
     uHtml += '<label class="chk"><input type="checkbox" name="unit" value="'+u.id+'"'+(on?' checked':'')+'>'+
-      '<span>'+u.id+'　'+u.name+'</span><span class="n">'+n+'問</span></label>';
+      '<span>'+u.id+'　'+u.name+'</span><span class="n">'+n+'問<small id="us'+u.id+'"></small></span></label>';
   });
   $("units").innerHTML = uHtml;
 
@@ -210,9 +252,9 @@
     return [].map.call(document.querySelectorAll('input[name="'+name+'"]:checked'), function(c){ return +c.value; });
   }
   function pool(){
-    var us = checked("unit"), ss = checked("star"), only = $("onlyMiss").checked;
+    var us = checked("unit"), ss = checked("star");
     return items.filter(function(x){
-      return us.indexOf(x.u)>=0 && ss.indexOf(x.s)>=0 && (!only || missSet[x.q]);
+      return us.indexOf(x.u)>=0 && ss.indexOf(x.s)>=0 && pass(x);
     });
   }
   function fromIdx(len){
@@ -227,8 +269,37 @@
     var k = num==="全部" ? rest : Math.min(num, rest);
     $("count").textContent = "対象 " + p.length + " 問 → " + k + " 問を" + (mode==="order" ? "本の順に" : "ランダムに") + "出題";
     $("start").disabled = p.length === 0;
-    store.set("ichimon-settings", {units:checked("unit"), stars:checked("star"), num:num, mode:mode});
+    store.set("ichimon-settings", {units:checked("unit"), stars:checked("star"), num:num, mode:mode, filter:filter});
+    paintStats();
   }
+  function paintStats(){
+    // 単元ごと：解いた数と、前回○の割合
+    U.forEach(function(u){
+      var xs = items.filter(function(x){return x.u===u.id;}), done=0, good=0;
+      xs.forEach(function(x){ var r=rec(x); if(r){ done++; if(r.l===1) good++; } });
+      var el = $("us"+u.id); if(el) el.textContent = done ? (done+"問済・○"+Math.round(good/done*100)+"%") : "";
+    });
+    // 選択中の単元・★の内訳
+    var us = checked("unit"), ss = checked("star");
+    var xs = items.filter(function(x){ return us.indexOf(x.u)>=0 && ss.indexOf(x.s)>=0; });
+    var nw=0, o=0, w=0;
+    xs.forEach(function(x){ var r=rec(x); if(!r) nw++; else if(r.l===1) o++; else w++; });
+    $("stat").textContent = "選択中 " + xs.length + "問：前回○ " + o + "／前回× " + w + "／まだ " + nw;
+  }
+  function paintFilters(){
+    [].forEach.call($("filters").children, function(c){ c.classList.toggle("on", c.dataset.f===filter); });
+  }
+  paintFilters();
+  $("filters").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if(!b) return;
+    filter = b.dataset.f; paintFilters(); update();
+  });
+  $("resetBtn").addEventListener("click", function(){ $("resetConfirm").classList.remove("hidden"); });
+  $("resetNo").addEventListener("click", function(){ $("resetConfirm").classList.add("hidden"); });
+  $("resetYes").addEventListener("click", function(){
+    log = {}; store.set("ichimon-log", log); try{ localStorage.removeItem("ichimon-miss"); }catch(e){}
+    $("resetConfirm").classList.add("hidden"); update();
+  });
   update();
 
   // --- 出題 ---
@@ -251,12 +322,18 @@
     var it = deck[idx];
     $("prog").textContent = (idx+1) + " / " + deck.length;
     $("barfill").style.width = (idx/deck.length*100) + "%";
-    $("qtag").innerHTML = it.u + " " + unitName(it.u) + "　<span class='star'>" + (it.s?STARLAB[it.s]:"") + "</span>";
+    $("qtag").innerHTML = it.u + " " + unitName(it.u) + "　<span class='star'>" + (it.s?STARLAB[it.s]:"") + "</span>" + recHtml(it);
     $("qtext").innerHTML = withYomi(it.q);
     $("atext").innerHTML = withYomi(it.a);
     $("atext").classList.remove("show");
     $("revealWrap").classList.remove("hidden");
     $("judge").classList.add("hidden");
+  }
+  function recHtml(x){
+    var r = rec(x);
+    if(!r) return "<span class='rec'>初めて</span>";
+    return "<span class='rec'>前回" + (r.l===1?"<span class='o'>○</span>":"<span class='x'>×</span>") +
+      "（<span class='o'>○" + r.c + "</span> <span class='x'>×" + r.w + "</span>）</span>";
   }
   function reveal(){
     $("atext").classList.add("show");
@@ -268,8 +345,10 @@
 
   function judge(ok){
     var it = deck[idx];
-    if(ok){ delete missSet[it.q]; } else { missSet[it.q] = true; misses.push(it); }
-    store.set("ichimon-miss", missSet);
+    var k = keyOf(it), r = log[k] || {c:0,w:0,l:0,t:0};
+    if(ok){ r.c++; r.l = 1; } else { r.w++; r.l = 0; misses.push(it); }
+    r.t = Date.now(); log[k] = r;
+    store.set("ichimon-log", log);
     idx++;
     if(idx >= deck.length) finish(); else render();
   }
