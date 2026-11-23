@@ -304,7 +304,7 @@
       var n = items.filter(function(x){return x.u===u.id;}).length;
       var on = !saved.units || saved.units.indexOf(u.id) >= 0;
       uHtml += '<label class="chk"><input type="checkbox" name="unit" data-era="' + ei + '" value="'+u.id+'"'+(on?' checked':'')+'>'+
-        '<span>'+u.id+'　'+u.name+'</span><span class="n">'+n+'問<small id="us'+u.id+'"></small></span></label>';
+        '<span>'+(u.no||u.id)+'　'+u.name+'</span><span class="n">'+n+'問<small id="us'+u.id+'"></small></span></label>';
     });
     uHtml += '</div></div>';
   });
@@ -459,12 +459,13 @@
     if(num !== "全部") d = d.slice(0, num);
     startWith(d);
   });
+  function unitNo(id){ for(var i=0;i<U.length;i++) if(U[i].id===id) return U[i].no||id; return id; }
   function unitName(id){ for(var i=0;i<U.length;i++) if(U[i].id===id) return U[i].name; return ""; }
   function render(){
     var it = deck[idx];
     $("prog").textContent = (idx+1) + " / " + deck.length;
     $("barfill").style.width = (idx/deck.length*100) + "%";
-    $("qtag").innerHTML = it.u + " " + unitName(it.u) + "　<span class='star'>" + (it.s?STARLAB[it.s]:"") + "</span>" + recHtml(it);
+    $("qtag").innerHTML = unitNo(it.u) + " " + unitName(it.u) + "　<span class='star'>" + (it.s?STARLAB[it.s]:"") + "</span>" + recHtml(it);
     $("qhist").innerHTML = histHtml(it);
     $("qtext").innerHTML = withYomi(it.q);
     $("atext").innerHTML = withYomi(it.a);
