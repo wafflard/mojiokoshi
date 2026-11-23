@@ -49,6 +49,7 @@
   .q{font-size:1.12rem;margin:10px 0 16px;font-weight:600}
   .a{display:none;background:var(--accent-soft);border-radius:10px;padding:12px;font-size:1.2rem;font-weight:bold;color:var(--accent)}
   .a.show{display:block}
+  .yomi{font-size:.68em;font-weight:normal;opacity:.8}
   .btns{display:flex;gap:10px;margin-top:14px}
   .btns button{flex:1;padding:14px 0;border-radius:10px;font-size:1.05rem;font-weight:bold;cursor:pointer;border:2px solid}
   .b-ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)!important}
@@ -251,7 +252,7 @@
     $("barfill").style.width = (idx/deck.length*100) + "%";
     $("qtag").innerHTML = it.u + " " + unitName(it.u) + "　<span class='star'>" + (it.s?STARLAB[it.s]:"") + "</span>";
     $("qtext").textContent = it.q;
-    $("atext").textContent = it.a;
+    $("atext").innerHTML = withYomi(it.a);
     $("atext").classList.remove("show");
     $("revealWrap").classList.remove("hidden");
     $("judge").classList.add("hidden");
@@ -285,6 +286,7 @@
     }).join("");
     show("result");
   }
+  function withYomi(a){ return esc(a).replace(/《([^》]*)》/g, '<span class="yomi">（$1）</span>'); }
   function esc(s){ return String(s).replace(/[&<>"]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];}); }
   $("retryMiss").addEventListener("click", function(){ startWith(mode==="order" ? misses.slice() : shuffle(misses.slice())); });
   $("again").addEventListener("click", function(){ $("start").click(); });
